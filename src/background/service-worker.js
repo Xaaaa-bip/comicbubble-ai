@@ -57,7 +57,7 @@ function buildCacheKey(imageKey, settings) {
         ? `gemini:${settings.geminiModel}`
         : `openai:${settings.openaiModel}`;
   const sig = [
-    'v6_fansub_ctx',
+    'v7_order_group_fix',
     imageKey,
     engineId,
     settings.translateSfx ? 'sfx1' : 'sfx0',

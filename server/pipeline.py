@@ -24,6 +24,7 @@ class TextLine:
     text: str
     score: float
     bg_rgb: Tuple[float, float, float]
+    bg_std: float = 0.0
 
     @property
     def w(self) -> float:
@@ -101,20 +102,27 @@ class ComicCVPipeline:
         return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
     @staticmethod
-    def _is_valid_english_text(text: str) -> bool:
+    def _is_valid_english_text(text: str, box_w: float = 0.0, box_h: float = 0.0) -> bool:
         t = (text or "").strip()
         if not t:
             return False
         cjk_count = len(re.findall(r"[\u4e00-\u9fff]", t))
-        latin_count = len(re.findall(r"[A-Za-z]", t))
+        latin_letters = re.findall(r"[A-Za-z]", t)
+        latin_count = len(latin_letters)
         if latin_count == 0 or cjk_count > latin_count:
             return False
+        # 过滤画稿曲线误识成的孤立单字母（如巨型 'D' / 'O' / 'I'）
+        if latin_count == 1:
+            if box_h > 75 or box_w > 95:
+                return False
+            if t.upper() not in ("I", "A", "I!", "I?", "A!", "A?"):
+                return False
         if re.fullmatch(r"(https?://)?(www\.)?[a-z0-9\-]+\.[a-z]{2,}(/\S*)?", t, re.I):
             return False
         return True
 
     @staticmethod
-    def _sample_local_bg_rgb(img_bgr: np.ndarray, x1: float, y1: float, x2: float, y2: float) -> Tuple[float, float, float]:
+    def _sample_local_bg_rgb(img_bgr: np.ndarray, x1: float, y1: float, x2: float, y2: float) -> Tuple[Tuple[float, float, float], float]:
         h_img, w_img = img_bgr.shape[:2]
         pad = max(3, int((y2 - y1) * 0.25))
         rx1 = max(0, int(x1) - pad)
@@ -123,7 +131,7 @@ class ComicCVPipeline:
         ry2 = min(h_img, int(y2) + pad)
         patch = img_bgr[ry1:ry2, rx1:rx2]
         if patch.size == 0:
-            return (255.0, 255.0, 255.0)
+            return (255.0, 255.0, 255.0), 0.0
 
         border_pixels = np.concatenate(
             [patch[0, :, :], patch[-1, :, :], patch[:, 0, :], patch[:, -1, :]],
@@ -144,7 +152,8 @@ class ComicCVPipeline:
 
         picked = sorted_px[lo:hi]
         b, g, r = np.mean(picked, axis=0)
-        return (float(r), float(g), float(b))
+        bg_std = float(np.mean(np.std(picked, axis=0)))
+        return (float(r), float(g), float(b)), bg_std
 
     def _run_ocr_on_crop(self, crop_bgr: np.ndarray, offset_y: int) -> List[Tuple[np.ndarray, str, float]]:
         # 0.5ms 快速跳过条漫常见的纯白/纯黑无字过渡画面
@@ -176,10 +185,12 @@ class ComicCVPipeline:
             box, text, score = entry[0], str(entry[1]), float(entry[2])
             if score < self.cfg.ocr_min_score:
                 continue
-            if not self._is_valid_english_text(text):
-                continue
             poly = np.array(box, dtype=np.float32) * inv_scale
             poly[:, 1] += float(offset_y)
+            bw = float(np.max(poly[:, 0]) - np.min(poly[:, 0]))
+            bh = float(np.max(poly[:, 1]) - np.min(poly[:, 1]))
+            if not self._is_valid_english_text(text, bw, bh):
+                continue
             items.append((poly, text.strip(), score))
         return items
 
@@ -227,8 +238,8 @@ class ComicCVPipeline:
                         dup = True
                         break
             if not dup:
-                bg_rgb = self._sample_local_bg_rgb(img_bgr, x1, y1, x2, y2)
-                kept.append(TextLine(poly=poly, x1=x1, y1=y1, x2=x2, y2=y2, text=text, score=score, bg_rgb=bg_rgb))
+                bg_rgb, bg_std = self._sample_local_bg_rgb(img_bgr, x1, y1, x2, y2)
+                kept.append(TextLine(poly=poly, x1=x1, y1=y1, x2=x2, y2=y2, text=text, score=score, bg_rgb=bg_rgb, bg_std=bg_std))
 
         return kept
 
@@ -293,25 +304,42 @@ class ComicCVPipeline:
                 max_h = max(a.h, b.h)
                 if max_h > ref_h * 2.35:
                     continue
+
+                both_uniform = a.bg_std < 22.0 and b.bg_std < 22.0
                 bg_dist = math.sqrt(sum((a.bg_rgb[k] - b.bg_rgb[k]) ** 2 for k in range(3)))
-                if bg_dist > 55.0:
-                    continue
 
                 v_gap = max(b.y1 - a.y2, a.y1 - b.y2)
                 h_overlap = min(a.x2, b.x2) - max(a.x1, b.x1)
                 h_gap = max(b.x1 - a.x2, a.x1 - b.x2)
+                center_dx = abs(a.cx - b.cx)
 
                 same_bubble = False
-                if -ref_h * 0.45 <= v_gap <= ref_h * 1.52:
-                    center_dx = abs(a.cx - b.cx)
-                    if h_overlap > -ref_h * 0.45 and center_dx <= max(a.w, b.w) * 0.72 + ref_h * 0.85:
-                        bg_lum = 0.299 * a.bg_rgb[0] + 0.587 * a.bg_rgb[1] + 0.114 * a.bg_rgb[2]
-                        if not self._has_border_barrier(img_gray, a, b, bg_lum):
-                            same_bubble = True
+                if both_uniform:
+                    # 常规纯色气泡：严格校验底色一致 + 黑边屏障防跨框误合
+                    if bg_dist <= 58.0 and -ref_h * 0.45 <= v_gap <= ref_h * 1.52:
+                        if h_overlap > -ref_h * 0.45 and center_dx <= max(a.w, b.w) * 0.72 + ref_h * 0.85:
+                            bg_lum = 0.299 * a.bg_rgb[0] + 0.587 * a.bg_rgb[1] + 0.114 * a.bg_rgb[2]
+                            if not self._has_border_barrier(img_gray, a, b, bg_lum):
+                                same_bubble = True
+                else:
+                    # 浮在复杂彩图/渐变背景上的多行旁白或无框字：只要字高相近、居中/左对齐且紧密堆叠即合并
+                    aligned = (
+                        center_dx <= max(a.w, b.w) * 0.30 + ref_h * 0.5
+                        or abs(a.x1 - b.x1) <= ref_h * 0.9
+                    )
+                    if (
+                        max_h <= ref_h * 1.50
+                        and -ref_h * 0.45 <= v_gap <= ref_h * 1.05
+                        and h_overlap > min(a.w, b.w) * 0.20
+                        and aligned
+                    ):
+                        same_bubble = True
 
+                # 同一行被 OCR 拆断的左右两段英文
                 v_overlap = min(a.y2, b.y2) - max(a.y1, b.y1)
                 if not same_bubble and v_overlap > ref_h * 0.48 and -ref_h * 0.3 <= h_gap <= ref_h * 1.45:
-                    same_bubble = True
+                    if not both_uniform or bg_dist <= 65.0:
+                        same_bubble = True
 
                 if same_bubble:
                     union(i, j)
@@ -321,8 +349,11 @@ class ComicCVPipeline:
             clusters.setdefault(find(idx), []).append(lines[idx])
 
         groups = list(clusters.values())
+        # 关键修复：使用气泡内统一的中位行高 med_h 分行排序，彻底根治因单行高度差异导致的行序倒挂！
         for g in groups:
-            g.sort(key=lambda ln: (round(ln.cy / max(6.0, ln.h * 0.65)), ln.x1))
+            med_h = float(np.median([ln.h for ln in g]))
+            row_unit = max(6.0, med_h * 0.58)
+            g.sort(key=lambda ln: (int(round(ln.cy / row_unit)), ln.x1))
         groups.sort(key=lambda g: (min(ln.y1 for ln in g) // 70, min(ln.x1 for ln in g)))
         return groups
 

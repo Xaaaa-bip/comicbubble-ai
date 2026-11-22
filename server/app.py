@@ -77,7 +77,7 @@ async def _run_full_pipeline(image_bytes: bytes, custom_prompt: str, force: bool
 
     sig = "|".join(
         [
-            "v6_fansub_ctx",
+            "v7_order_group_fix",
             CONFIG.active_translator_name(),
             CONFIG.inpaint_method,
             CONFIG.target_lang,
@@ -111,8 +111,16 @@ async def _run_full_pipeline(image_bytes: bytes, custom_prompt: str, force: bool
         originals = [b["original"] for b in bubbles]
         kinds = [b.get("bubbleKind", "speech") for b in bubbles]
         translations, engine_used = await translate_batch(originals, CONFIG, custom_prompt, kinds)
+        cleaned_bubbles = []
         for b, zh in zip(bubbles, translations):
-            b["translation"] = zh
+            orig_s = (b.get("original") or "").strip()
+            zh_s = (zh or "").strip()
+            # 剔除 1~2 字符且未译出的画稿误检噪点（如孤立的 'D'），不破坏原画面
+            if len(orig_s) <= 2 and zh_s.upper() == orig_s.upper():
+                continue
+            b["translation"] = zh_s
+            cleaned_bubbles.append(b)
+        bubbles = cleaned_bubbles
     translate_ms = int((time.perf_counter() - t_tr0) * 1000)
 
     result_data = {
