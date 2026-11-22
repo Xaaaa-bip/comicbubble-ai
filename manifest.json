@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "ComicBubble AI - 漫画气泡英译中",
+  "version": "2.0.0",
+  "description": "自动识别网页漫画（图片/Canvas/背景图）中的英文气泡并无痕擦字翻译为中文，支持自建轻量 CPU VPS 后端及多模态大模型，支持原文对照、在线编辑与高清译后图导出。",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "ComicBubble AI - 漫画气泡翻译",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "src/options/options.html",
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "contextMenus",
+    "cookies",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "exclude_matches": [
+        "*://challenges.cloudflare.com/*",
+        "*://*.challenges.cloudflare.com/*",
+        "*://*.fastly.com/*",
+        "*://*.fastly.net/*"
+      ],
+      "all_frames": true,
+      "js": [
+        "src/shared/config.js",
+        "src/content/image-utils.js",
+        "src/content/content.js"
+      ],
+      "css": ["src/content/content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ComicBubble AI</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="brand">
+      <div class="logo">译</div>
+      <div>
+        <div class="title">ComicBubble AI</div>
+        <div class="subtitle">无痕擦字 · 漫画气泡英译中</div>
+      </div>
+    </div>
+    <button id="openOptionsBtn" class="icon-btn" title="高级设置">⚙</button>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="control">控制台</button>
+    <button class="tab" data-tab="api">引擎配置</button>
+  </nav>
+
+  <!-- 控制台面板 -->
+  <section id="tab-control" class="panel active">
+    <div id="apiAlert" class="alert hidden">
+      <span>尚未填写 VPS 后端地址或 API Key，请先配置。</span>
+      <button id="goApiBtn" class="link-btn">去配置 →</button>
+    </div>
+
+    <div class="stats-card">
+      <div class="stat-item">
+        <div id="statDone" class="stat-num">0</div>
+        <div class="stat-label">已译画面</div>
+      </div>
+      <div class="stat-item">
+        <div id="statBubbles" class="stat-num">0</div>
+        <div class="stat-label">译文气泡</div>
+      </div>
+      <div class="stat-item">
+        <div id="statPending" class="stat-num">0</div>
+        <div class="stat-label">处理中</div>
+      </div>
+    </div>
+
+    <div class="toggle-group">
+      <label class="toggle-row">
+        <div>
+          <div class="row-title">当前网站自动翻译</div>
+          <div id="siteDomainText" class="row-sub">检测中...</div>
+        </div>
+        <input id="siteAutoToggle" type="checkbox" class="switch" />
+      </label>
+
+      <label class="toggle-row">
+        <div>
+          <div class="row-title">显示中文译文层</div>
+          <div class="row-sub">快捷键 Alt + T 一键切换对照</div>
+        </div>
+        <input id="overlayVisibleToggle" type="checkbox" class="switch" checked />
+      </label>
+    </div>
+
+    <div class="actions">
+      <button id="translatePageBtn" class="btn primary">一键全话翻完（唤醒懒加载 + 进度条）</button>
+      <div class="btn-row">
+        <button id="retranslatePageBtn" class="btn secondary">强制全话重译</button>
+        <button id="exportAllBtn" class="btn secondary">导出本页译图</button>
+      </div>
+    </div>
+
+    <div class="tip-box">
+      快捷键：<strong>Alt + A</strong> 一键全话翻完 · <strong>Alt + T</strong> 切换原文/译文；双击（手机轻点）气泡可修改译文。
+    </div>
+  </section>
+
+  <!-- 引擎配置面板 -->
+  <section id="tab-api" class="panel">
+    <div class="field">
+      <label for="providerSelect">识别与翻译引擎</label>
+      <select id="providerSelect">
+        <option value="vps">自建 VPS 无痕擦字后端（推荐，无积分限制）</option>
+        <option value="gemini">直连 Google Gemini API</option>
+        <option value="openai">直连 OpenAI 兼容视觉接口</option>
+      </select>
+    </div>
+
+    <div id="vpsFields">
+      <div class="field">
+        <label for="vpsBaseUrl">VPS 后端地址</label>
+        <input id="vpsBaseUrl" type="text" placeholder="http://你的VPS_IP:8765 或 https://comic.domain.com" />
+      </div>
+      <div class="field">
+        <label for="vpsApiToken">访问 Token（与 VPS .env 的 API_TOKEN 一致）</label>
+        <input id="vpsApiToken" type="password" placeholder="部署时自动生成的 API_TOKEN（未设可留空）" autocomplete="off" />
+      </div>
+    </div>
+
+    <div id="geminiFields" class="hidden">
+      <div class="field">
+        <label for="geminiApiKey">Gemini API Key</label>
+        <input id="geminiApiKey" type="password" placeholder="AIza..." autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="geminiModel">模型名称</label>
+        <input id="geminiModel" type="text" placeholder="gemini-2.5-flash" />
+      </div>
+      <div class="field">
+        <label for="geminiBaseUrl">接口地址（可选反代）</label>
+        <input id="geminiBaseUrl" type="text" placeholder="https://generativelanguage.googleapis.com/v1beta" />
+      </div>
+    </div>
+
+    <div id="openaiFields" class="hidden">
+      <div class="field">
+        <label for="openaiBaseUrl">Base URL</label>
+        <input id="openaiBaseUrl" type="text" placeholder="https://api.openai.com/v1" />
+      </div>
+      <div class="field">
+        <label for="openaiApiKey">API Key（本地 Ollama 可留空）</label>
+        <input id="openaiApiKey" type="password" placeholder="sk-..." autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="openaiModel">视觉模型名称</label>
+        <input id="openaiModel" type="text" placeholder="gpt-4o-mini / qwen-vl-max" />
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button id="testApiBtn" class="btn secondary">测试连通性</button>
+      <button id="saveApiBtn" class="btn primary">保存配置</button>
+    </div>
+
+    <div id="apiMsg" class="msg hidden"></div>
+  </section>
+
+  <footer class="footer">
+    <span id="engineBadge" class="badge">Engine: VPS</span>
+    <span id="statusMsg" class="status-text"></span>
+  </footer>
+
+  <script src="../shared/config.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

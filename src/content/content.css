@@ -1,0 +1,496 @@
+/* ComicBubble AI v2 - 就近父容器挂载 + 双层无痕贴片渲染样式 */
+
+.cb-layer-container {
+  position: absolute !important;
+  pointer-events: none !important;
+  overflow: visible !important;
+  isolation: isolate !important;
+  z-index: 9999 !important;
+  box-sizing: border-box !important;
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif !important;
+  line-height: 1.24 !important;
+}
+
+.cb-layer-container *,
+.cb-layer-container *::before,
+.cb-layer-container *::after {
+  box-sizing: border-box !important;
+}
+
+.cb-bubbles-container {
+  position: absolute !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+}
+
+.cb-bubbles-container.cb-allow-overflow {
+  overflow: visible !important;
+}
+
+.cb-bubbles-container.cb-hidden {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* 第 1 层：无痕擦字贴片底图层（对标 IsManga inpaintingImage） */
+.cb-inpaint-patch {
+  position: absolute !important;
+  pointer-events: none !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  z-index: 1 !important;
+}
+
+.cb-inpaint-patch.cb-fallback-ellipse {
+  border-radius: 42% / 36% !important;
+}
+
+.cb-inpaint-patch.cb-fallback-rect {
+  border-radius: 6px !important;
+}
+
+/* 第 2 层：译文排版交互层（纯透明无边框，中文直接浮于原气泡内） */
+.cb-bubble {
+  position: absolute !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  padding: 1px 2px !important;
+  overflow: visible !important;
+  word-break: break-word !important;
+  overflow-wrap: break-word !important;
+  pointer-events: auto !important;
+  cursor: default !important;
+  user-select: text !important;
+  background: transparent !important;
+  border: none !important;
+  z-index: 2 !important;
+  outline: none !important;
+}
+
+.cb-bubble.cb-click-through {
+  pointer-events: none !important;
+}
+
+.cb-bubble.cb-type-sfx {
+  font-style: italic !important;
+}
+
+.cb-bubble:hover {
+  z-index: 12 !important;
+}
+
+.cb-bubble-text {
+  display: block !important;
+  width: 100% !important;
+  line-height: 1.18 !important;
+  letter-spacing: 0.01em !important;
+  white-space: pre-wrap !important;
+  text-wrap: balance !important;
+}
+
+/* 双击在线编辑框 */
+.cb-bubble-editor {
+  width: 100% !important;
+  height: 100% !important;
+  border: 2px solid #2563eb !important;
+  border-radius: 6px !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  font-size: 13px !important;
+  line-height: 1.3 !important;
+  padding: 4px 6px !important;
+  resize: none !important;
+  outline: none !important;
+  text-align: center !important;
+  font-family: inherit !important;
+  z-index: 30 !important;
+}
+
+/* 图片右上角悬浮控制条 */
+.cb-toolbar {
+  position: absolute !important;
+  top: 8px !important;
+  right: 8px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 4px 6px !important;
+  border-radius: 999px !important;
+  background: rgba(17, 24, 39, 0.84) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  color: #f9fafb !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28) !important;
+  pointer-events: auto !important;
+  opacity: 0 !important;
+  transition: opacity 0.2s ease !important;
+  z-index: 40 !important;
+}
+
+.cb-toolbar:hover,
+.cb-toolbar.cb-toolbar-active {
+  opacity: 0.94 !important;
+}
+
+.cb-status-dot {
+  width: 7px !important;
+  height: 7px !important;
+  border-radius: 50% !important;
+  margin-left: 4px !important;
+  flex-shrink: 0 !important;
+}
+
+.cb-status-loading .cb-status-dot {
+  background: #38bdf8 !important;
+  animation: cb-pulse 1s infinite ease-in-out !important;
+}
+
+.cb-status-done .cb-status-dot {
+  background: #4ade80 !important;
+}
+
+.cb-status-error .cb-status-dot {
+  background: #f87171 !important;
+}
+
+.cb-status-label {
+  padding: 0 4px !important;
+  font-size: 11px !important;
+  color: #e5e7eb !important;
+  white-space: nowrap !important;
+  max-width: 180px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.cb-btn {
+  appearance: none !important;
+  border: none !important;
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #f9fafb !important;
+  font-size: 11px !important;
+  font-family: inherit !important;
+  padding: 4px 8px !important;
+  border-radius: 999px !important;
+  cursor: pointer !important;
+  transition: background 0.15s ease !important;
+  white-space: nowrap !important;
+  line-height: 1.1 !important;
+}
+
+.cb-btn:hover {
+  background: rgba(59, 130, 246, 0.9) !important;
+}
+
+.cb-btn:disabled {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+}
+
+/* 原文悬浮提示 Tooltip */
+#cb-tooltip {
+  position: fixed !important;
+  max-width: 300px !important;
+  padding: 8px 11px !important;
+  border-radius: 8px !important;
+  background: rgba(15, 23, 42, 0.95) !important;
+  color: #f8fafc !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  pointer-events: none !important;
+  z-index: 2147483645 !important;
+  opacity: 0 !important;
+  transition: opacity 0.12s ease !important;
+  word-break: break-word !important;
+}
+
+#cb-tooltip.cb-show {
+  opacity: 1 !important;
+}
+
+.cb-tooltip-tag {
+  display: inline-block !important;
+  font-size: 10px !important;
+  color: #93c5fd !important;
+  margin-bottom: 3px !important;
+  font-weight: 600 !important;
+}
+
+.cb-tooltip-hint {
+  display: block !important;
+  margin-top: 5px !important;
+  font-size: 10px !important;
+  color: #94a3b8 !important;
+}
+
+/* 右下角 Toast 通知 */
+#cb-toast {
+  position: fixed !important;
+  right: 20px !important;
+  bottom: 20px !important;
+  max-width: 340px !important;
+  padding: 10px 14px !important;
+  border-radius: 10px !important;
+  background: rgba(15, 23, 42, 0.92) !important;
+  color: #f8fafc !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  z-index: 2147483646 !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  transform: translateY(10px) !important;
+  transition: opacity 0.2s ease, transform 0.2s ease !important;
+}
+
+#cb-toast.cb-show {
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+}
+
+@keyframes cb-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+/* ==================== Android / 移动端触屏悬浮球与底部原文卡片 ==================== */
+
+#cb-mobile-fab {
+  position: fixed !important;
+  right: 14px !important;
+  bottom: 76px !important;
+  z-index: 2147483644 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  gap: 8px !important;
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif !important;
+  touch-action: none !important;
+  user-select: none !important;
+}
+
+.cb-fab-ball {
+  width: 46px !important;
+  height: 46px !important;
+  border-radius: 50% !important;
+  border: 2px solid rgba(255, 255, 255, 0.28) !important;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.92), rgba(79, 70, 229, 0.94)) !important;
+  color: #ffffff !important;
+  font-size: 17px !important;
+  font-weight: 800 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.36) !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  opacity: 0.78 !important;
+  transition: opacity 0.18s ease, transform 0.15s ease !important;
+}
+
+.cb-fab-ball.cb-fab-open,
+.cb-fab-ball:active {
+  opacity: 1 !important;
+  transform: scale(0.95) !important;
+}
+
+.cb-fab-ball.cb-fab-busy {
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.42), 0 6px 18px rgba(15, 23, 42, 0.36) !important;
+}
+
+.cb-fab-menu {
+  display: none !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  padding: 8px !important;
+  border-radius: 14px !important;
+  background: rgba(15, 23, 42, 0.92) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38) !important;
+  min-width: 126px !important;
+}
+
+.cb-fab-menu.cb-open {
+  display: flex !important;
+}
+
+.cb-fab-item {
+  appearance: none !important;
+  border: none !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #f8fafc !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  font-family: inherit !important;
+  padding: 9px 12px !important;
+  border-radius: 9px !important;
+  text-align: center !important;
+  cursor: pointer !important;
+}
+
+.cb-fab-item:active {
+  background: rgba(79, 70, 229, 0.85) !important;
+}
+
+/* 移动端底部气泡原文对照 / 编辑抽屉 */
+#cb-mobile-sheet {
+  position: fixed !important;
+  left: 10px !important;
+  right: 10px !important;
+  bottom: 12px !important;
+  z-index: 2147483647 !important;
+  background: rgba(15, 23, 42, 0.96) !important;
+  color: #f8fafc !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45) !important;
+  padding: 14px 14px 12px !important;
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif !important;
+  display: none !important;
+}
+
+#cb-mobile-sheet.cb-open {
+  display: block !important;
+}
+
+.cb-sheet-label {
+  font-size: 11px !important;
+  color: #93c5fd !important;
+  font-weight: 700 !important;
+  margin-bottom: 4px !important;
+}
+
+.cb-sheet-orig {
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+  color: #e2e8f0 !important;
+  margin-bottom: 10px !important;
+  max-height: 90px !important;
+  overflow-y: auto !important;
+  word-break: break-word !important;
+}
+
+.cb-sheet-input {
+  width: 100% !important;
+  min-height: 54px !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(148, 163, 184, 0.4) !important;
+  background: rgba(30, 41, 59, 0.95) !important;
+  color: #ffffff !important;
+  font-size: 14px !important;
+  line-height: 1.4 !important;
+  padding: 8px 10px !important;
+  font-family: inherit !important;
+  outline: none !important;
+  margin-bottom: 10px !important;
+  resize: none !important;
+}
+
+.cb-sheet-actions {
+  display: flex !important;
+  gap: 8px !important;
+  justify-content: flex-end !important;
+}
+
+.cb-sheet-btn {
+  appearance: none !important;
+  border: none !important;
+  border-radius: 9px !important;
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  font-family: inherit !important;
+  cursor: pointer !important;
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #f8fafc !important;
+}
+
+.cb-sheet-btn.cb-primary {
+  background: #4f46e5 !important;
+  color: #ffffff !important;
+}
+
+/* ==================== 一键全话翻译实时进度条 ==================== */
+
+#cb-chapter-progress {
+  position: fixed !important;
+  left: 50% !important;
+  bottom: 18px !important;
+  transform: translateX(-50%) !important;
+  width: min(380px, calc(100vw - 28px)) !important;
+  padding: 10px 14px !important;
+  border-radius: 14px !important;
+  background: rgba(15, 23, 42, 0.94) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  color: #f8fafc !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38) !important;
+  z-index: 2147483645 !important;
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif !important;
+  display: none !important;
+  pointer-events: auto !important;
+}
+
+#cb-chapter-progress.cb-show {
+  display: block !important;
+}
+
+.cb-prog-top {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  margin-bottom: 7px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+.cb-prog-text {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.cb-prog-stop {
+  appearance: none !important;
+  border: none !important;
+  background: rgba(248, 113, 113, 0.22) !important;
+  color: #fecaca !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  padding: 3px 9px !important;
+  border-radius: 999px !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+}
+
+.cb-prog-stop:hover {
+  background: rgba(239, 68, 68, 0.5) !important;
+}
+
+.cb-prog-track {
+  width: 100% !important;
+  height: 6px !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.14) !important;
+  overflow: hidden !important;
+}
+
+.cb-prog-fill {
+  height: 100% !important;
+  width: 0% !important;
+  border-radius: 999px !important;
+  background: linear-gradient(90deg, #38bdf8, #6366f1, #4ade80) !important;
+  transition: width 0.25s ease !important;
+}

@@ -1,0 +1,22 @@
+# Secrets & local runtime files
+.env
+server/.env
+server/data/
+server/.venv/
+server/__pycache__/
+*.pyc
+*.pyo
+*.db
+*.db-wal
+*.db-shm
+
+# Packaged artifacts (may contain user-local config if rebuilt locally)
+mobile/*.zip
+*.crx
+*.pem
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

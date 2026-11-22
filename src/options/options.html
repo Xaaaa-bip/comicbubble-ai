@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ComicBubble AI - 高级设置</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="container">
+    <header class="page-header">
+      <div class="brand">
+        <div class="logo">译</div>
+        <div>
+          <h1>ComicBubble AI 高级设置</h1>
+          <p>自建无痕擦字 VPS 后端 &amp; 多模态漫画气泡英译中配置</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="resetBtn" class="btn secondary">恢复默认</button>
+        <button id="saveBtn" class="btn primary">保存全部设置</button>
+      </div>
+    </header>
+
+    <div id="bannerMsg" class="banner hidden"></div>
+
+    <main class="grid">
+      <!-- 1. 引擎配置 -->
+      <section class="card">
+        <h2>1. 识别擦字与翻译引擎</h2>
+        <div class="field">
+          <label for="provider">当前启用引擎</label>
+          <select id="provider">
+            <option value="vps">自建 VPS 无痕擦字后端（推荐：RapidOCR + 逐气泡局部无痕修复 + 无限翻）</option>
+            <option value="gemini">直连 Google Gemini 原生 API</option>
+            <option value="openai">直连 OpenAI 兼容视觉接口</option>
+          </select>
+        </div>
+
+        <div class="subcard" style="margin-bottom: 14px;">
+          <h3>自建 VPS 后端配置（对应 server/ 目录）</h3>
+          <div class="two-col" style="margin-bottom: 0;">
+            <div class="field">
+              <label for="vpsBaseUrl">VPS 服务地址</label>
+              <input id="vpsBaseUrl" type="text" placeholder="http://你的VPS_IP:8765 或 https://comic.example.com" />
+            </div>
+            <div class="field">
+              <label for="vpsApiToken">API Token（对应 .env 的 API_TOKEN）</label>
+              <input id="vpsApiToken" type="password" placeholder="留空表示未开启鉴权" />
+            </div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="subcard">
+            <h3>直连 Gemini 备用配置</h3>
+            <div class="field">
+              <label for="geminiApiKey">API Key</label>
+              <input id="geminiApiKey" type="password" placeholder="AIza..." />
+            </div>
+            <div class="field">
+              <label for="geminiModel">模型名称</label>
+              <input id="geminiModel" type="text" placeholder="gemini-2.5-flash" />
+            </div>
+            <div class="field">
+              <label for="geminiBaseUrl">Base URL</label>
+              <input id="geminiBaseUrl" type="text" />
+            </div>
+          </div>
+
+          <div class="subcard">
+            <h3>直连 OpenAI 兼容备用配置</h3>
+            <div class="field">
+              <label for="openaiBaseUrl">Base URL</label>
+              <input id="openaiBaseUrl" type="text" placeholder="https://api.openai.com/v1" />
+            </div>
+            <div class="field">
+              <label for="openaiApiKey">API Key</label>
+              <input id="openaiApiKey" type="password" placeholder="sk-..." />
+            </div>
+            <div class="field">
+              <label for="openaiModel">视觉模型名称</label>
+              <input id="openaiModel" type="text" placeholder="gpt-4o-mini / qwen-vl-max" />
+            </div>
+          </div>
+        </div>
+
+        <div class="inline-actions">
+          <button id="testApiBtn" class="btn secondary">测试当前选中引擎连通性</button>
+          <span id="testResult" class="hint"></span>
+        </div>
+      </section>
+
+      <!-- 2. 翻译风格与提示词 -->
+      <section class="card">
+        <h2>2. 翻译偏好与 Prompt 定制</h2>
+        <label class="checkbox-row">
+          <input id="translateSfx" type="checkbox" />
+          <span>同时尝试翻译拟声词 / 艺术字 (SFX)（直连 VLM 模式生效）</span>
+        </label>
+        <div class="field">
+          <label for="customPrompt">自定义翻译补充指令（VPS 使用 LLM 翻译或直连 VLM 时均会生效）</label>
+          <textarea id="customPrompt" rows="3" placeholder="例如：角色 Spider-Man 译作“蜘蛛侠”，语气偏口语热血。"></textarea>
+        </div>
+      </section>
+
+      <!-- 3. 自动扫描与站点规则 -->
+      <section class="card">
+        <h2>3. 自动扫描、站点规则与性能</h2>
+        <label class="checkbox-row">
+          <input id="autoTranslate" type="checkbox" />
+          <span>开启全局视口懒加载自动翻译（支持 img / canvas / background-image / iframe）</span>
+        </label>
+
+        <div class="field">
+          <label for="siteMode">站点生效策略</label>
+          <select id="siteMode">
+            <option value="blacklist">黑名单模式：所有网站默认启用，排除下方列表站点</option>
+            <option value="whitelist">白名单模式：仅在下方指定的漫画网站自动启用</option>
+          </select>
+        </div>
+
+        <div class="two-col">
+          <div class="field">
+            <label for="blacklistDomains">黑名单域名（每行一个）</label>
+            <textarea id="blacklistDomains" rows="5"></textarea>
+          </div>
+          <div class="field">
+            <label for="whitelistDomains">白名单域名（每行一个）</label>
+            <textarea id="whitelistDomains" rows="5"></textarea>
+          </div>
+        </div>
+
+        <div class="four-col">
+          <div class="field">
+            <label for="minImageWidth">最小宽度 (px)</label>
+            <input id="minImageWidth" type="number" min="120" max="1500" />
+          </div>
+          <div class="field">
+            <label for="minImageHeight">最小高度 (px)</label>
+            <input id="minImageHeight" type="number" min="120" max="1500" />
+          </div>
+          <div class="field">
+            <label for="maxImageDimension">上传最大宽度 (px)</label>
+            <input id="maxImageDimension" type="number" min="640" max="3200" step="64" />
+          </div>
+          <div class="field">
+            <label for="maxConcurrency">最大并发请求数</label>
+            <input id="maxConcurrency" type="number" min="1" max="5" />
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. 外观样式与交互 -->
+      <section class="card">
+        <h2>4. 译文气泡外观与交互</h2>
+        <div class="three-col">
+          <div class="field">
+            <label for="fontFamily">译文字体</label>
+            <select id="fontFamily">
+              <option value='"Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif'>默认黑体（微软雅黑 / 苹方）</option>
+              <option value='"YouYuan", "Comic Sans MS", "Microsoft YaHei", sans-serif'>圆体风格（幼圆 / 漫画感）</option>
+              <option value='"SimHei", "Heiti SC", "Noto Sans SC", sans-serif'>经典漫画黑体（SimHei）</option>
+              <option value='"KaiTi", "STKaiti", serif'>楷体（古风 / 旁白风）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="fontWeight">字体粗细</label>
+            <select id="fontWeight">
+              <option value="500">中等 (500)</option>
+              <option value="600">半粗 (600，推荐)</option>
+              <option value="700">粗体 (700)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="overlayOpacity">擦字层不透明度 (<span id="opacityVal">0.98</span>)</label>
+            <input id="overlayOpacity" type="range" min="0.7" max="1" step="0.02" />
+          </div>
+        </div>
+
+        <label class="checkbox-row">
+          <input id="autoSampleBgColor" type="checkbox" />
+          <span>无贴片模式下自动采样气泡真实底色</span>
+        </label>
+        <label class="checkbox-row">
+          <input id="showOriginalOnHover" type="checkbox" />
+          <span>鼠标悬停气泡时浮窗显示英文原文对照</span>
+        </label>
+        <label class="checkbox-row">
+          <input id="clickThrough" type="checkbox" />
+          <span>译文气泡鼠标点击穿透（不挡全屏点击翻页）</span>
+        </label>
+      </section>
+
+      <!-- 5. 缓存管理 -->
+      <section class="card">
+        <h2>5. 浏览器本地缓存管理</h2>
+        <label class="checkbox-row">
+          <input id="enableCache" type="checkbox" />
+          <span>启用浏览器端 LRU 缓存（VPS 端同时自带 SQLite 持久化缓存）</span>
+        </label>
+        <div class="inline-actions">
+          <span id="cacheStatsText" class="hint">已缓存 0 / 80 张画面</span>
+          <button id="clearCacheBtn" class="btn danger">清空浏览器本地缓存</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="../shared/config.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
