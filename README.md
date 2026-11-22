@@ -25,8 +25,10 @@
 - **全形态漫画载体 & 防盗链抓图**
   - 支持 `<img>`、`<canvas>`、CSS `background-image` `<div>` 与 `iframe`（`all_frames: true`）。
   - 内置 `declarativeNetRequest` 会话级动态注入原站 `Referer` + `Cookie` 绕过防盗链 CDN，并支持 `captureVisibleTab` 视口截屏兜底。
-- **多翻译引擎自由切换（0 成本或汉化组级 LLM）**
-  - **VPS 后端模式（推荐）**：支持 OpenAI 兼容文本大模型（DeepSeek / Qwen / GPT-4o-mini 等，整页语境极自然）、Gemini 文本 API，未填 Key 时自动走国内直连免费的 **腾讯 TranSmart**（`~300ms` 批量极速）并回退 MyMemory / Google。
+- **官方本土化级多引擎翻译（0 成本或汉化组级 LLM）**
+  - **作品设定激活 + 作品级持久化术语表**：自动携带漫画网页标题与 URL 识别作品 ID，按作品在 SQLite 中自动提取并锁死高频专词（人名、家族、地名、魔物等，支持 `/api/v1/glossary` 查询），跨屏与跨话 100% 统一不漂移。
+  - **汉化组本土化重写**：针对“韩→英→中”二手英翻腔深度重写，自动纠错 OCR 粘连/错字，按对白/旁白/喊叫气泡自动切换语气，并维护按作品隔离的滚动前文记忆。
+  - **VPS 后端模式（推荐）**：支持 OpenAI 兼容文本大模型（DeepSeek / Qwen / GPT-4o-mini 等）、Gemini 文本 API，未填 Key 时自动走国内直连免费的 **腾讯 TranSmart**（`~300ms` 批量极速）并回退 MyMemory / Google。
   - **纯插件直连模式（无需 VPS）**：也可在插件中直接切换为直连 Google Gemini 或 OpenAI 兼容视觉大模型。
 - **双端交互 & 高清导出**
   - 桌面端：鼠标悬停看英文原文、双击气泡在线微调译文、`Alt + T` 切换原文/译文、`Alt + A` 一键全话翻完、单张/整页合成导出高清 PNG。
