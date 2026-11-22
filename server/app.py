@@ -77,7 +77,7 @@ async def _run_full_pipeline(image_bytes: bytes, custom_prompt: str, force: bool
 
     sig = "|".join(
         [
-            "v5_fast_clean",
+            "v6_fansub_ctx",
             CONFIG.active_translator_name(),
             CONFIG.inpaint_method,
             CONFIG.target_lang,
@@ -109,7 +109,8 @@ async def _run_full_pipeline(image_bytes: bytes, custom_prompt: str, force: bool
     t_tr0 = time.perf_counter()
     if bubbles:
         originals = [b["original"] for b in bubbles]
-        translations, engine_used = await translate_batch(originals, CONFIG, custom_prompt)
+        kinds = [b.get("bubbleKind", "speech") for b in bubbles]
+        translations, engine_used = await translate_batch(originals, CONFIG, custom_prompt, kinds)
         for b, zh in zip(bubbles, translations):
             b["translation"] = zh
     translate_ms = int((time.perf_counter() - t_tr0) * 1000)

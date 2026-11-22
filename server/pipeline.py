@@ -538,6 +538,16 @@ class ComicCVPipeline:
         text_color = "rgb(20, 20, 20)" if final_lum > 140 else "rgb(250, 250, 250)"
         bg_color = f"rgb({bg_r}, {bg_g}, {bg_b})"
 
+        is_rect = cw / max(1, ch) > 2.3 and len(lines) <= 2
+        orig_font_ratio = round((median_h * 0.88) / max(1.0, float(h_img)), 5)
+        # 粗判气泡语气类别，供 LLM 切换口语/旁白/喊叫风格
+        if orig_font_ratio >= 0.032:
+            bubble_kind = "shout"
+        elif is_rect or (cw > w_img * 0.45 and len(lines) >= 3):
+            bubble_kind = "narration"
+        else:
+            bubble_kind = "speech"
+
         return {
             "x": cx1,
             "y": cy1,
@@ -549,14 +559,15 @@ class ComicCVPipeline:
             "textHeight": max(12, ty2 - ty1),
             "imgWidth": w_img,
             "imgHeight": h_img,
-            "origFontRatio": round((median_h * 0.88) / max(1.0, float(h_img)), 5),
+            "origFontRatio": orig_font_ratio,
             "isUniformBg": is_uniform_bg,
+            "bubbleKind": bubble_kind,
             "inpaintingDataUrl": f"data:image/webp;base64,{b64}",
             "colors": {
                 "background": bg_color,
                 "text": text_color,
             },
-            "shape": "rect" if (cw / max(1, ch) > 2.3 and len(lines) <= 2) else "ellipse",
+            "shape": "rect" if is_rect else "ellipse",
         }
 
     def detect_and_inpaint(self, image_bytes: bytes) -> Tuple[List[dict], int, int]:
