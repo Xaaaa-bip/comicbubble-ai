@@ -58,6 +58,8 @@ def verify_token(
 class JsonTranslateRequest(BaseModel):
     image_base64: str
     custom_prompt: str = ""
+    page_title: str = ""
+    page_url: str = ""
     force: bool = False
 
 
@@ -68,16 +70,24 @@ def _decode_base64_image(raw: str) -> bytes:
     return base64.b64decode(data)
 
 
-async def _run_full_pipeline(image_bytes: bytes, custom_prompt: str, force: bool) -> dict:
+async def _run_full_pipeline(
+    image_bytes: bytes,
+    custom_prompt: str,
+    force: bool,
+    page_title: str = "",
+    page_url: str = "",
+) -> dict:
     t0 = time.perf_counter()
     if not image_bytes:
         raise HTTPException(status_code=400, detail="Empty image payload")
     if len(image_bytes) > 25 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Image too large (>25MB)")
 
+    series_key = TranslationCache.extract_series_key(page_title, page_url)
     sig = "|".join(
         [
-            "v7_order_group_fix",
+            "v8_official_loc",
+            series_key,
             CONFIG.active_translator_name(),
             CONFIG.inpaint_method,
             CONFIG.target_lang,
@@ -110,12 +120,22 @@ async def _run_full_pipeline(image_bytes: bytes, custom_prompt: str, force: bool
     if bubbles:
         originals = [b["original"] for b in bubbles]
         kinds = [b.get("bubbleKind", "speech") for b in bubbles]
-        translations, engine_used = await translate_batch(originals, CONFIG, custom_prompt, kinds)
+        glossary = cache.get_glossary(series_key) if cache else {}
+        translations, engine_used, new_terms = await translate_batch(
+            originals,
+            CONFIG,
+            custom_prompt,
+            kinds=kinds,
+            page_title=page_title,
+            series_key=series_key,
+            glossary=glossary,
+        )
+        if cache and new_terms:
+            cache.upsert_glossary(series_key, new_terms)
         cleaned_bubbles = []
         for b, zh in zip(bubbles, translations):
             orig_s = (b.get("original") or "").strip()
             zh_s = (zh or "").strip()
-            # 剔除 1~2 字符且未译出的画稿误检噪点（如孤立的 'D'），不破坏原画面
             if len(orig_s) <= 2 and zh_s.upper() == orig_s.upper():
                 continue
             b["translation"] = zh_s
@@ -126,6 +146,7 @@ async def _run_full_pipeline(image_bytes: bytes, custom_prompt: str, force: bool
     result_data = {
         "imgWidth": img_w,
         "imgHeight": img_h,
+        "series": series_key,
         "translator": engine_used,
         "bubbles": bubbles,
     }
@@ -160,11 +181,13 @@ async def health(_: None = Depends(verify_token)):
 async def translate_upload(
     file: UploadFile = File(...),
     custom_prompt: str = Form(default=""),
+    page_title: str = Form(default=""),
+    page_url: str = Form(default=""),
     force: bool = Form(default=False),
     _: None = Depends(verify_token),
 ):
     image_bytes = await file.read()
-    return await _run_full_pipeline(image_bytes, custom_prompt, force)
+    return await _run_full_pipeline(image_bytes, custom_prompt, force, page_title, page_url)
 
 
 @app.post("/api/v1/translate-json")
@@ -176,7 +199,16 @@ async def translate_json(
         image_bytes = _decode_base64_image(req.image_base64)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid base64 image: {exc}")
-    return await _run_full_pipeline(image_bytes, req.custom_prompt, req.force)
+    return await _run_full_pipeline(
+        image_bytes, req.custom_prompt, req.force, req.page_title, req.page_url
+    )
+
+
+@app.get("/api/v1/glossary")
+async def get_glossary(series: str, _: None = Depends(verify_token)):
+    if not cache:
+        return {"ok": True, "series": series, "terms": {}}
+    return {"ok": True, "series": series, "terms": cache.get_glossary(series, limit=100)}
 
 
 @app.post("/api/v1/cache/clear")

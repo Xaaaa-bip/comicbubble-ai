@@ -3,28 +3,33 @@ import asyncio
 import json
 import re
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 import httpx
 
 from config import ServerConfig
 
-# 滚动前文记忆（保留最近 10 分钟内至多 14 条已翻对白，保持条漫跨屏人名/家族/称谓一致）
-_RECENT_CONTEXT: deque = deque(maxlen=14)
-_CONTEXT_TTL_SEC = 600.0
+# 按漫画作品隔离的滚动前文记忆（保留最近 15 分钟内至多 16 条已翻对白，保证跨屏语气/称谓/剧情连贯）
+_SERIES_CONTEXT: Dict[str, deque] = {}
+_CONTEXT_TTL_SEC = 900.0
 
 
-def _get_recent_context_lines() -> List[dict]:
+def _get_recent_context_lines(series_key: str) -> List[dict]:
+    dq = _SERIES_CONTEXT.get(series_key or "default")
+    if not dq:
+        return []
     now = time.time()
-    return [{"en": en, "zh": zh} for ts, en, zh in _RECENT_CONTEXT if now - ts <= _CONTEXT_TTL_SEC]
+    return [{"en": en, "zh": zh} for ts, en, zh in dq if now - ts <= _CONTEXT_TTL_SEC]
 
 
-def _remember_context(originals: List[str], translations: List[str]) -> None:
+def _remember_context(series_key: str, originals: List[str], translations: List[str]) -> None:
+    key = series_key or "default"
+    dq = _SERIES_CONTEXT.setdefault(key, deque(maxlen=16))
     now = time.time()
     for en, zh in zip(originals, translations):
         en_s = (en or "").strip()
         zh_s = (zh or "").strip()
         if en_s and zh_s and en_s != zh_s:
-            _RECENT_CONTEXT.append((now, en_s[:140], zh_s[:140]))
+            dq.append((now, en_s[:140], zh_s[:140]))
 
 
 def _extract_json_array(raw: str) -> Optional[list]:
@@ -62,29 +67,68 @@ def _extract_json_array(raw: str) -> Optional[list]:
     return None
 
 
-FANSUB_SYSTEM_PROMPT = """你是一位国内顶级韩漫/美漫汉化组主翻兼润色（擅长奇幻、热血、动作、都市等全题材条漫）。
-你的任务是把 OCR 提取的英文漫画气泡文本，还原原意后意译为**极其地道、自然、有画面感与情绪张力的简体中文漫画台词**。
+def _extract_json_obj(raw: str) -> Optional[dict]:
+    text = (raw or "").strip()
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        s = text.find("{")
+        e = text.rfind("}")
+        if s != -1 and e > s:
+            try:
+                parsed = json.loads(text[s : e + 1])
+            except Exception:
+                return None
+        else:
+            return None
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, list):
+        return {"translations": parsed}
+    return None
 
-核心汉化铁律：
-1. **OCR 纠错与还原**：输入文本来自漫画 OCR，经常出现全大写、单词粘连漏空格（如 USBEINGFROMTHESAMEHOUSE → us being from the same house）、标点缺失或形近字误识（I/l/1、O/0、rn/m），务必先结合前后气泡语境自动脑补还原真实英文句意再翻译。
-2. **彻底消灭翻译腔**：
-   - 严禁机翻直译句式（如“作为负责……的军官”、“尽管……但是……”、“我的天啊”、“哦，不”、“该死的，你做了什么”）。
-   - 善用自然中文口语、倒装、反问、省略和语气词（如「偏偏派她来护送我？」「明明同出一门……」「搞什么鬼」「完蛋了」「少废话」）。
-   - 奇幻/韩漫高频词按语境地道意译：如 House → 家族/世家（绝不译成房子），Master/Young Master → 大人/家主/少爷，Aura/Mana → 斗气/魔力，Officer/Commander → 负责人/统领/长官。
-3. **按气泡类型 (`kind`) 切换语气**：
-   - `speech`（对白气泡）：鲜活口语，贴合角色性格与情绪，简短有力；
-   - `narration`（方框旁白/心理独白）：精炼有叙事感或内心吐槽感，流畅自然；
-   - `shout`（大字号喊叫/爆发）：短促炸裂，有冲击力，善用感叹号或破折号。
-4. **跨气泡连贯切分**：如果相邻几个 `id` 明显是同一句话被拆成多段气泡，请先整体理解完整意思，再按中文自然语序和阅读停顿合理拆分回对应的 `id`，做到上下连读丝滑、不重复主语、不留悬空介词。
-5. **人名与术语前后统一**：严格参考给出的“前文译名参考”保持同一角色、家族、地名、称谓（你/您/少爷/大人）全话统一；纯英文人名/姓氏音译成流畅中文（如 Isabella La Baskerville → 伊莎贝拉·拉·巴斯克维尔）。
-6. **简洁适配气泡**：译文凝练不啰嗦，尽量贴合气泡字数容量，不要无端扩写。
-7. **严格输出 JSON**：必须按原始 `id` 一一对应返回，绝不漏项或增项，格式固定为：{"translations":[{"id":0,"zh":"..."},...]}"""
+
+OFFICIAL_LOCALIZATION_PROMPT = """你是哔哩哔哩漫画 / 快看漫画 / 腾讯动漫官方签约正版韩漫、美漫资深本地化主笔（精翻+终审润色）。
+你的目标不是“字面翻译英文”，而是产出**直接达到正版官方平台上线水准**的简体中文漫画台词。
+
+核心本地化铁律：
+1. **激活作品官方设定（最关键）**：
+   - 你会收到当前漫画的【作品信息（网页标题/章节）】。如果这是你熟知的知名韩漫/日漫/网文改编作（例如 *Revenge of the Iron-Blooded Sword Hound* 即正版《铁血剑家猎犬的回归》：主角「维基尔」、家族「巴斯克维尔」、骑士团长「伊莎贝拉」、大监狱「努贝尔瓦格」等），**必须主动使用该作公认的官方中文译名、专有地名/势力名，并严格贴合原作主角与角色的性格基调**（如冷峻克制、傲慢凌厉、杀伐果断等）。
+   - 严禁把作品里的法语/外语专有地名、人名、组织名做字面直译（例如监狱名 `Nouvelle Vague` 绝不能直译成「新浪潮」，应译作「努贝尔瓦格」）。
+2. **彻底洗掉“韩→英→中”二手英翻腔**：
+   - 大量英文版条漫本身是由韩文转译的，充斥英语长定语从句与书面转折（如 `assigned as the officer in charge of escorting me to ... despite us being from the same house`）。
+   - **绝对禁止顺着英文语序直译！** 先在脑中还原漫画场景与潜台词，再彻底打散重组为**中文奇幻/热血漫画的原生语感**：
+     - 善用精准有张力的动词与短词（押送/押解而非陪同，同族/一门而非来自同一个家族，家主/统领/押送官而非负责人，魔力石/魔力水晶，世家而非房子）。
+     - 多用精炼短句、反问、冷笑、留白与中文网文/漫画节奏，删掉多余主语和“的/这/那/尽管……但是……”。
+     - 对比示例：
+       - ❌ 生硬直译：「尽管我们来自同一个家族，她还是被指派为负责护送我去新浪潮的军官？」
+       - ✅ 官方水准：「同为巴斯克维尔一族，竟派她亲自押送我去努贝尔瓦格？」
+3. **OCR 纠错与跨气泡连读**：
+   - 输入来自漫画 OCR，可能出现全大写、单词粘连漏空格（如 `USBEINGFROMTHESAMEHOUSE`）或个别形近字误识（`I/l/1`、`O/0`、`rn/m`），先自动还原真实英文句意再意译。
+   - 若相邻 `id` 明显是被拆成多个气泡的同一句话，先整体理解，再按中文自然停顿流畅拆分回各 `id`，保证上下格连读丝滑无断层。
+4. **按气泡类型 (`kind`) 精准控腔**：
+   - `narration`（旁白/冷峻独白）：凝练、有文学/史诗/冷冽叙事张力；
+   - `shout`（大字号爆发）：极短促炸裂，直击情绪；
+   - `speech`（角色对白）：活人感强，符合人物阶级与当下冲突（上位者威压、下位者敬畏、宿敌嘲讽）。
+5. **100% 锁死术语一致性**：
+   - 凡是【本作已锁定术语表】中出现的专词，**必须一字不差沿用**。
+   - 若本屏新出现重要人名、家族、地名、组织、魔物、核心设定词（普通日常词不要收），请在返回 JSON 的 `new_terms` 字典中列出 `{"English": "锁定中文"}`，供后续章节永久沿用。
+6. **简洁适配气泡 + 严格 JSON 输出**：
+   - 译文凝练，不无端扩写撑爆气泡。
+   - 严格返回合法 JSON，按原始 `id` 一一对应不漏项，格式：
+     {"translations":[{"id":0,"zh":"..."},...],"new_terms":{"English Term":"锁定中文"}}"""
 
 
 def _build_batch_prompt(
     texts: List[str],
     custom_prompt: str = "",
     kinds: Optional[List[str]] = None,
+    page_title: str = "",
+    series_key: str = "default",
+    glossary: Optional[Dict[str, str]] = None,
 ) -> str:
     items = []
     for idx, t in enumerate(texts):
@@ -93,21 +137,52 @@ def _build_batch_prompt(
             entry["kind"] = kinds[idx]
         items.append(entry)
 
-    ctx_lines = _get_recent_context_lines()
-    ctx_block = ""
-    if ctx_lines:
-        ctx_block = (
-            "【前文译名与语境参考（仅供保持人名/称谓/剧情连贯，不要翻译这一段）】：\n"
-            + json.dumps(ctx_lines[-10:], ensure_ascii=False)
-            + "\n\n"
+    sections = []
+    if page_title.strip() or (series_key and series_key != "default"):
+        info = page_title.strip() or series_key
+        sections.append(f"【当前漫画作品与章节】：{info}")
+
+    if glossary:
+        sections.append(
+            "【本作已锁定术语表（必须严格沿用，禁止随意改译）】：\n"
+            + json.dumps(glossary, ensure_ascii=False)
         )
 
-    extra = f"【用户专属术语/译风要求】：\n{custom_prompt.strip()}\n\n" if custom_prompt.strip() else ""
-    return (
-        f"{ctx_block}{extra}"
-        "【当前待翻译气泡（按漫画阅读顺序排列，请输出严格 JSON）】：\n"
-        f"{json.dumps(items, ensure_ascii=False)}"
+    ctx_lines = _get_recent_context_lines(series_key)
+    if ctx_lines:
+        sections.append(
+            "【前文已翻对白参考（用于承接语境与称谓，不要重复翻译）】：\n"
+            + json.dumps(ctx_lines[-10:], ensure_ascii=False)
+        )
+
+    if custom_prompt.strip():
+        sections.append(f"【用户专属译名/译风指令】：\n{custom_prompt.strip()}")
+
+    sections.append(
+        "【当前待本地化气泡（按阅读顺序排列，请输出严格 JSON）】：\n"
+        + json.dumps(items, ensure_ascii=False)
     )
+    return "\n\n".join(sections)
+
+
+def _parse_llm_response(texts: List[str], raw_content: str) -> Tuple[List[str], Dict[str, str]]:
+    obj = _extract_json_obj(raw_content)
+    if not obj:
+        raise RuntimeError("LLM 未返回有效 JSON")
+    arr = None
+    for key in ("translations", "items", "bubbles", "results"):
+        if isinstance(obj.get(key), list):
+            arr = obj[key]
+            break
+    if not arr:
+        raise RuntimeError("LLM 返回 JSON 缺少 translations 列表")
+    new_terms: Dict[str, str] = {}
+    raw_terms = obj.get("new_terms")
+    if isinstance(raw_terms, dict):
+        for k, v in raw_terms.items():
+            if isinstance(k, str) and isinstance(v, str) and k.strip() and v.strip():
+                new_terms[k.strip()] = v.strip()
+    return _map_translations(texts, arr), new_terms
 
 
 async def _translate_openai(
@@ -115,7 +190,10 @@ async def _translate_openai(
     cfg: ServerConfig,
     custom_prompt: str,
     kinds: Optional[List[str]] = None,
-) -> List[str]:
+    page_title: str = "",
+    series_key: str = "default",
+    glossary: Optional[Dict[str, str]] = None,
+) -> Tuple[List[str], Dict[str, str]]:
     endpoint = (
         cfg.openai_base_url
         if cfg.openai_base_url.endswith("/chat/completions")
@@ -125,13 +203,13 @@ async def _translate_openai(
         "Content-Type": "application/json",
         "Authorization": f"Bearer {cfg.openai_api_key}",
     }
-    prompt = _build_batch_prompt(texts, custom_prompt, kinds)
+    prompt = _build_batch_prompt(texts, custom_prompt, kinds, page_title, series_key, glossary)
     payload = {
         "model": cfg.openai_model,
-        "temperature": 0.65,
+        "temperature": 0.72,
         "response_format": {"type": "json_object"},
         "messages": [
-            {"role": "system", "content": FANSUB_SYSTEM_PROMPT},
+            {"role": "system", "content": OFFICIAL_LOCALIZATION_PROMPT},
             {"role": "user", "content": prompt},
         ],
     }
@@ -145,10 +223,7 @@ async def _translate_openai(
     data = resp.json()
 
     content = data["choices"][0]["message"]["content"]
-    arr = _extract_json_array(content)
-    if not arr:
-        raise RuntimeError("OpenAI 兼容接口未返回有效 JSON 翻译列表")
-    return _map_translations(texts, arr)
+    return _parse_llm_response(texts, content)
 
 
 async def _translate_gemini(
@@ -156,17 +231,20 @@ async def _translate_gemini(
     cfg: ServerConfig,
     custom_prompt: str,
     kinds: Optional[List[str]] = None,
-) -> List[str]:
+    page_title: str = "",
+    series_key: str = "default",
+    glossary: Optional[Dict[str, str]] = None,
+) -> Tuple[List[str], Dict[str, str]]:
     endpoint = (
         f"{cfg.gemini_base_url}/models/{cfg.gemini_model}:generateContent"
         f"?key={cfg.gemini_api_key}"
     )
-    prompt = _build_batch_prompt(texts, custom_prompt, kinds)
+    prompt = _build_batch_prompt(texts, custom_prompt, kinds, page_title, series_key, glossary)
     payload = {
-        "systemInstruction": {"parts": [{"text": FANSUB_SYSTEM_PROMPT}]},
+        "systemInstruction": {"parts": [{"text": OFFICIAL_LOCALIZATION_PROMPT}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 0.65,
+            "temperature": 0.72,
             "responseMimeType": "application/json",
         },
     }
@@ -177,10 +255,7 @@ async def _translate_gemini(
 
     parts = data["candidates"][0]["content"]["parts"]
     raw_text = "".join(p.get("text", "") for p in parts)
-    arr = _extract_json_array(raw_text)
-    if not arr:
-        raise RuntimeError("Gemini 接口未返回有效 JSON 翻译列表")
-    return _map_translations(texts, arr)
+    return _parse_llm_response(texts, raw_text)
 
 
 def _map_translations(texts: List[str], arr: list) -> List[str]:
@@ -375,10 +450,13 @@ async def translate_batch(
     cfg: ServerConfig,
     custom_prompt: str = "",
     kinds: Optional[List[str]] = None,
-) -> tuple[List[str], str]:
-    """根据配置批量翻译整页漫画气泡，返回 (译文列表, 实际使用的引擎标识)"""
+    page_title: str = "",
+    series_key: str = "default",
+    glossary: Optional[Dict[str, str]] = None,
+) -> Tuple[List[str], str, Dict[str, str]]:
+    """根据配置批量本地化整页漫画气泡，返回 (译文列表, 实际使用的引擎标识, 本屏新提取专词字典)"""
     if not texts:
-        return [], "none"
+        return [], "none", {}
 
     merged_prompt = "\n".join(p for p in (cfg.custom_prompt, custom_prompt) if p and p.strip())
     mode = cfg.translator
@@ -386,9 +464,11 @@ async def translate_batch(
     if mode == "openai" or (mode == "auto" and cfg.openai_api_key):
         if cfg.openai_api_key:
             try:
-                res = await _translate_openai(texts, cfg, merged_prompt, kinds)
-                _remember_context(texts, res)
-                return res, f"openai:{cfg.openai_model}"
+                res, new_terms = await _translate_openai(
+                    texts, cfg, merged_prompt, kinds, page_title, series_key, glossary
+                )
+                _remember_context(series_key, texts, res)
+                return res, f"openai:{cfg.openai_model}", new_terms
             except Exception:
                 if mode == "openai":
                     raise
@@ -396,34 +476,35 @@ async def translate_batch(
     if mode == "gemini" or (mode == "auto" and cfg.gemini_api_key):
         if cfg.gemini_api_key:
             try:
-                res = await _translate_gemini(texts, cfg, merged_prompt, kinds)
-                _remember_context(texts, res)
-                return res, f"gemini:{cfg.gemini_model}"
+                res, new_terms = await _translate_gemini(
+                    texts, cfg, merged_prompt, kinds, page_title, series_key, glossary
+                )
+                _remember_context(series_key, texts, res)
+                return res, f"gemini:{cfg.gemini_model}", new_terms
             except Exception:
                 if mode == "gemini":
                     raise
 
     if mode == "google_free":
         res = await _translate_google_free(texts, cfg.target_lang)
-        _remember_context(texts, res)
-        return res, "google_free"
+        _remember_context(series_key, texts, res)
+        return res, "google_free", {}
 
     if mode == "mymemory_free":
         res = await _translate_mymemory_free(texts, cfg.target_lang)
-        _remember_context(texts, res)
-        return res, "mymemory_free"
+        _remember_context(series_key, texts, res)
+        return res, "mymemory_free", {}
 
-    # auto / transmart_free：优先腾讯 TranSmart（国内 ~250ms 批量极速），失败自动回退 MyMemory -> Google
     tm_res = await _translate_transmart_free(texts, cfg.target_lang)
     if tm_res is not None:
-        _remember_context(texts, tm_res)
-        return tm_res, "transmart_free"
+        _remember_context(series_key, texts, tm_res)
+        return tm_res, "transmart_free", {}
 
     res = await _translate_mymemory_free(texts, cfg.target_lang)
     if any(zh != en for zh, en in zip(res, texts)):
-        _remember_context(texts, res)
-        return res, "mymemory_free"
+        _remember_context(series_key, texts, res)
+        return res, "mymemory_free", {}
 
     res_g = await _translate_google_free(texts, cfg.target_lang)
-    _remember_context(texts, res_g)
-    return res_g, "google_free"
+    _remember_context(series_key, texts, res_g)
+    return res_g, "google_free", {}

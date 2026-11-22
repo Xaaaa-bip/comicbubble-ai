@@ -191,7 +191,12 @@
       url: `${base}/api/v1/translate-json`,
       headers,
       timeout: 35000,
-      data: JSON.stringify({ image_base64: dataUrl, force: Boolean(force) })
+      data: JSON.stringify({
+        image_base64: dataUrl,
+        page_title: document.title || '',
+        page_url: location.href || '',
+        force: Boolean(force)
+      })
     });
     if (res.status < 200 || res.status >= 300) {
       throw new Error(`VPS HTTP ${res.status}`);

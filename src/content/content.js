@@ -944,6 +944,8 @@
       const res = await chrome.runtime.sendMessage({
         type: 'TRANSLATE_VPS_IMAGE',
         dataUrl: stitched.dataUrl,
+        pageTitle: document.title || '',
+        pageUrl: location.href || '',
         force: Boolean(force)
       });
       if (!res || !res.ok) throw new Error((res && res.error) || 'VPS 拼带擦字失败');
@@ -1276,6 +1278,8 @@
         const res = await chrome.runtime.sendMessage({
           type: 'TRANSLATE_VPS_IMAGE',
           dataUrl: encoded.dataUrl,
+          pageTitle: document.title || '',
+          pageUrl: location.href || '',
           force: Boolean(st.force)
         });
         if (!res || !res.ok) throw new Error((res && res.error) || 'VPS 分片失败');
@@ -1529,6 +1533,8 @@
           const res = await chrome.runtime.sendMessage({
             type: 'TRANSLATE_VPS_IMAGE',
             dataUrl: encoded.dataUrl,
+            pageTitle: document.title || '',
+            pageUrl: location.href || '',
             force: Boolean(force)
           });
           if (!res || !res.ok) {

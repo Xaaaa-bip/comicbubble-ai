@@ -57,7 +57,7 @@ function buildCacheKey(imageKey, settings) {
         ? `gemini:${settings.geminiModel}`
         : `openai:${settings.openaiModel}`;
   const sig = [
-    'v7_order_group_fix',
+    'v8_official_loc',
     imageKey,
     engineId,
     settings.translateSfx ? 'sfx1' : 'sfx0',
@@ -261,7 +261,7 @@ function formatApiError(status, bodyText) {
 
 // -------------------- 引擎 1：自建 VPS 无痕擦字后端 --------------------
 
-async function callVpsTranslate(dataUrl, settings, force) {
+async function callVpsTranslate(dataUrl, settings, force, pageMeta) {
   const baseUrl = (settings.vpsBaseUrl || '').trim().replace(/\/+$/, '');
   if (!/^https?:\/\/.+/i.test(baseUrl)) {
     throw new Error('请先在插件配置中填写 VPS 后端地址（如 http://你的IP:8765）');
@@ -272,6 +272,12 @@ async function callVpsTranslate(dataUrl, settings, force) {
   form.append('file', blob, 'comic.jpg');
   if (settings.customPrompt) {
     form.append('custom_prompt', settings.customPrompt.trim());
+  }
+  if (pageMeta && pageMeta.pageTitle) {
+    form.append('page_title', String(pageMeta.pageTitle).slice(0, 200));
+  }
+  if (pageMeta && pageMeta.pageUrl) {
+    form.append('page_url', String(pageMeta.pageUrl).slice(0, 400));
   }
   form.append('force', force ? 'true' : 'false');
 
@@ -637,7 +643,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case 'TRANSLATE_VPS_IMAGE': {
         const settings = await globalThis.ComicBubbleConfig.loadSettings();
-        const bubbles = await callVpsTranslate(message.dataUrl, settings, Boolean(message.force));
+        const pageMeta = {
+          pageTitle: message.pageTitle || (sender && sender.tab && sender.tab.title) || '',
+          pageUrl: message.pageUrl || (sender && (sender.url || (sender.tab && sender.tab.url))) || ''
+        };
+        const bubbles = await callVpsTranslate(message.dataUrl, settings, Boolean(message.force), pageMeta);
         sendResponse({ ok: true, bubbles });
         break;
       }

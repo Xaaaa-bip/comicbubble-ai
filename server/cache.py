@@ -2,10 +2,12 @@ from contextlib import closing
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 
 class TranslationCache:
@@ -46,6 +48,86 @@ class TranslationCache:
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_translations_updated ON translations(updated_at)"
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS series_glossary (
+                        series_key TEXT NOT NULL,
+                        term_en TEXT NOT NULL,
+                        term_zh TEXT NOT NULL,
+                        updated_at REAL NOT NULL,
+                        PRIMARY KEY (series_key, term_en)
+                    )
+                    """
+                )
+
+    @staticmethod
+    def extract_series_key(page_title: str = "", page_url: str = "") -> str:
+        """从漫画 URL 路径或网页标题提取统一的作品标识（同一部漫画不同话共享术语表）"""
+        if page_url:
+            try:
+                path = urlparse(page_url).path.strip("/")
+                segs = [s for s in path.split("/") if s]
+                # 常见漫画站路径: /webtoon/<slug>/chapter-189 或 /manga/<slug>/ch-12
+                for idx, seg in enumerate(segs):
+                    if seg.lower() in ("webtoon", "manga", "comic", "series", "title", "manhwa") and idx + 1 < len(segs):
+                        slug = re.sub(r"[^a-z0-9\-_]+", "", segs[idx + 1].lower())
+                        if len(slug) >= 3:
+                            return slug[:80]
+                # 退化：取不含 chapter/ep 的最长有效段
+                cleaned = [
+                    s.lower()
+                    for s in segs
+                    if not re.match(r"^(chapter|ch|ep|episode|vol|v)[\-_]?\d+", s, re.I)
+                ]
+                if cleaned:
+                    best = max(cleaned, key=len)
+                    slug = re.sub(r"[^a-z0-9\-_\u4e00-\u9fff]+", "", best)
+                    if len(slug) >= 3:
+                        return slug[:80]
+            except Exception:
+                pass
+
+        if page_title:
+            t = re.sub(r"^\s*read\s+", "", page_title, flags=re.I)
+            t = re.split(r"\s*[-–—|:]\s*(?:chapter|ch\.?|ep\.?|episode|\d+)", t, maxsplit=1, flags=re.I)[0]
+            t = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "-", t.lower()).strip("-")
+            if len(t) >= 2:
+                return t[:80]
+        return "default"
+
+    def get_glossary(self, series_key: str, limit: int = 50) -> Dict[str, str]:
+        if not series_key or series_key == "default":
+            return {}
+        with self._lock, closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT term_en, term_zh FROM series_glossary WHERE series_key = ? ORDER BY updated_at ASC LIMIT ?",
+                (series_key, limit),
+            ).fetchall()
+            return {r[0]: r[1] for r in rows}
+
+    def upsert_glossary(self, series_key: str, terms: Dict[str, str]) -> int:
+        """首次出现即锁定译名（INSERT OR IGNORE），防止多线程并发或跨话漂移"""
+        if not series_key or series_key == "default" or not terms:
+            return 0
+        now = time.time()
+        rows = []
+        for en, zh in terms.items():
+            en_s = re.sub(r"\s+", " ", str(en or "").strip())
+            zh_s = str(zh or "").strip()
+            if 2 <= len(en_s) <= 48 and 1 <= len(zh_s) <= 24 and en_s.lower() != zh_s.lower():
+                rows.append((series_key, en_s, zh_s, now))
+        if not rows:
+            return 0
+        with self._lock, closing(self._connect()) as conn:
+            with conn:
+                conn.executemany(
+                    """
+                    INSERT OR IGNORE INTO series_glossary (series_key, term_en, term_zh, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+        return len(rows)
 
     @staticmethod
     def build_key(image_bytes: bytes, signature: str) -> str:
