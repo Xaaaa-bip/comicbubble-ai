@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         ComicBubble AI - Android 手机漫画气泡无痕翻译
 // @namespace    https://comicbubble.local/
-// @version      5.0.0
-// @description  专为 Android 手机浏览器（狐猴/Via/X浏览器/Firefox+Tampermonkey）打造：直连自建 VPS 无痕透明擦字、原字号自适应、条漫视口优先+整话后台预翻、触屏悬浮球与点按原文对照。
+// @version      5.1.0
+// @description  专为 Android 手机浏览器（狐猴/Kiwi/Firefox+Tampermonkey/Via/X浏览器）打造：自动翻译漫画与条漫、直连自建 VPS 无痕透明擦字、原字号自适应、一键全话唤醒懒加载与进度条、触屏悬浮球与点按原文对照。
 // @match        *://*/*
 // @exclude      *://challenges.cloudflare.com/*
 // @exclude      *://*.challenges.cloudflare.com/*
 // @grant        GM_xmlhttpRequest
+// @grant        GM.xmlHttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @connect      *
@@ -16,27 +17,57 @@
 (function () {
   'use strict';
 
+  const STORAGE_KEY = 'cb_mobile_cfg_v2';
   const DEFAULT_CFG = {
-    vpsBaseUrl: 'http://your-vps-ip:8765',
+    vpsBaseUrl: '',
     vpsApiToken: '',
     autoTranslate: true,
     maxConcurrency: 3,
-    blacklist: ['baidu.com', 'bing.com', 'google.com', 'github.com', 'bilibili.com', 'zhihu.com', 'taobao.com', 'jd.com', 'youtube.com']
+    blacklist: [
+      'baidu.com',
+      'bing.com',
+      'google.com',
+      'github.com',
+      'bilibili.com',
+      'zhihu.com',
+      'taobao.com',
+      'jd.com',
+      'youtube.com'
+    ]
   };
 
   function loadCfg() {
+    let saved = null;
     try {
-      const saved = typeof GM_getValue === 'function' ? GM_getValue('cb_mobile_cfg', null) : null;
-      return Object.assign({}, DEFAULT_CFG, saved || {});
-    } catch (_) {
-      return Object.assign({}, DEFAULT_CFG);
+      if (typeof GM_getValue === 'function') {
+        saved = GM_getValue(STORAGE_KEY, null) || GM_getValue('cb_mobile_cfg', null);
+      }
+    } catch (_) {}
+    if (!saved) {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) saved = JSON.parse(raw);
+      } catch (_) {}
     }
+    const cfg = Object.assign({}, DEFAULT_CFG, saved || {});
+    if (cfg.vpsBaseUrl && cfg.vpsBaseUrl.includes('your-vps-ip')) {
+      cfg.vpsBaseUrl = '';
+    }
+    return cfg;
   }
 
   function saveCfg(next) {
     try {
-      if (typeof GM_setValue === 'function') GM_setValue('cb_mobile_cfg', next);
+      if (typeof GM_setValue === 'function') GM_setValue(STORAGE_KEY, next);
     } catch (_) {}
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch (_) {}
+  }
+
+  function hasValidVps(cfg) {
+    const u = String((cfg && cfg.vpsBaseUrl) || '').trim();
+    return /^https?:\/\/.+/i.test(u) && !u.includes('your-vps-ip');
   }
 
   const state = {
@@ -53,17 +84,23 @@
     fullChapterForce: false,
     fullChapterTimer: null,
     toastEl: null,
-    toastTimer: null
+    toastTimer: null,
+    lastErrToastTs: 0,
+    unconfiguredHintShown: false
   };
 
   function normHost(h) {
     return String(h || '').toLowerCase().replace(/^www\./, '');
   }
 
-  function isSiteEnabled() {
-    if (!state.cfg.autoTranslate) return false;
+  function isSiteNotBlacklisted() {
     const host = normHost(location.hostname);
+    if (!host) return false;
     return !(state.cfg.blacklist || []).some((d) => host === normHost(d) || host.endsWith('.' + normHost(d)));
+  }
+
+  function isSiteAutoEnabled() {
+    return Boolean(state.cfg.autoTranslate) && isSiteNotBlacklisted();
   }
 
   // -------------------- 样式注入 --------------------
@@ -78,8 +115,9 @@
 .cbm-bubble{position:absolute!important;display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;padding:1px 2px!important;pointer-events:auto!important;background:transparent!important;z-index:2!important;word-break:break-word!important}
 .cbm-text{display:block!important;width:100%!important;line-height:1.16!important;white-space:pre-wrap!important;font-weight:600!important}
 #cbm-fab{position:fixed!important;right:14px!important;bottom:76px!important;z-index:2147483644!important;display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:8px!important;touch-action:none!important;user-select:none!important;font-family:"Microsoft YaHei","PingFang SC",sans-serif!important}
-.cbm-ball{width:46px!important;height:46px!important;border-radius:50%!important;border:2px solid rgba(255,255,255,.3)!important;background:linear-gradient(135deg,rgba(56,189,248,.92),rgba(79,70,229,.95))!important;color:#fff!important;font-size:17px!important;font-weight:800!important;display:flex!important;align-items:center!important;justify-content:center!important;box-shadow:0 6px 18px rgba(0,0,0,.35)!important;opacity:.8!important;padding:0!important}
-.cbm-menu{display:none!important;flex-direction:column!important;gap:6px!important;padding:8px!important;border-radius:14px!important;background:rgba(15,23,42,.94)!important;border:1px solid rgba(255,255,255,.15)!important;min-width:130px!important;box-shadow:0 10px 26px rgba(0,0,0,.4)!important}
+.cbm-ball{width:46px!important;height:46px!important;border-radius:50%!important;border:2px solid rgba(255,255,255,.32)!important;background:linear-gradient(135deg,rgba(56,189,248,.92),rgba(79,70,229,.95))!important;color:#fff!important;font-size:17px!important;font-weight:800!important;display:flex!important;align-items:center!important;justify-content:center!important;box-shadow:0 6px 18px rgba(0,0,0,.35)!important;opacity:.82!important;padding:0!important}
+.cbm-ball.cbm-busy{box-shadow:0 0 0 4px rgba(56,189,248,.5),0 6px 18px rgba(0,0,0,.35)!important;opacity:1!important}
+.cbm-menu{display:none!important;flex-direction:column!important;gap:6px!important;padding:8px!important;border-radius:14px!important;background:rgba(15,23,42,.95)!important;border:1px solid rgba(255,255,255,.15)!important;min-width:142px!important;box-shadow:0 10px 26px rgba(0,0,0,.4)!important}
 .cbm-menu.cbm-open{display:flex!important}
 .cbm-mbtn{border:none!important;background:rgba(255,255,255,.12)!important;color:#f8fafc!important;font-size:13px!important;font-weight:600!important;padding:9px 12px!important;border-radius:9px!important;text-align:center!important}
 #cbm-sheet{position:fixed!important;left:10px!important;right:10px!important;bottom:12px!important;z-index:2147483647!important;background:rgba(15,23,42,.96)!important;color:#f8fafc!important;border-radius:16px!important;border:1px solid rgba(255,255,255,.15)!important;box-shadow:0 12px 32px rgba(0,0,0,.45)!important;padding:14px!important;display:none!important;font-family:"Microsoft YaHei","PingFang SC",sans-serif!important}
@@ -90,7 +128,7 @@
 .cbm-sacts{display:flex!important;gap:8px!important;justify-content:flex-end!important}
 .cbm-sbtn{border:none!important;border-radius:9px!important;padding:8px 14px!important;font-size:13px!important;font-weight:600!important;background:rgba(255,255,255,.15)!important;color:#fff!important}
 .cbm-sbtn.cbm-pri{background:#4f46e5!important}
-#cbm-toast{position:fixed!important;left:50%!important;bottom:132px!important;transform:translateX(-50%)!important;background:rgba(15,23,42,.92)!important;color:#fff!important;padding:8px 14px!important;border-radius:999px!important;font-size:12px!important;z-index:2147483646!important;pointer-events:none!important;opacity:0!important;transition:opacity .2s!important;max-width:85vw!important;text-align:center!important}
+#cbm-toast{position:fixed!important;left:50%!important;bottom:136px!important;transform:translateX(-50%)!important;background:rgba(15,23,42,.94)!important;color:#fff!important;padding:9px 14px!important;border-radius:12px!important;font-size:12px!important;line-height:1.4!important;z-index:2147483646!important;pointer-events:none!important;opacity:0!important;transition:opacity .2s!important;max-width:86vw!important;text-align:center!important}
 #cbm-toast.cbm-show{opacity:1!important}
 #cbm-prog{position:fixed!important;left:50%!important;bottom:16px!important;transform:translateX(-50%)!important;width:min(360px,calc(100vw - 24px))!important;padding:10px 12px!important;border-radius:14px!important;background:rgba(15,23,42,.95)!important;color:#f8fafc!important;border:1px solid rgba(255,255,255,.15)!important;box-shadow:0 10px 26px rgba(0,0,0,.4)!important;z-index:2147483645!important;display:none!important;font-family:"Microsoft YaHei","PingFang SC",sans-serif!important}
 #cbm-prog.cbm-show{display:block!important}
@@ -105,11 +143,12 @@
     const s = document.createElement('style');
     s.id = 'cbm-style';
     s.textContent = STYLE_TEXT;
-    document.head.appendChild(s);
+    (document.head || document.documentElement).appendChild(s);
   }
 
-  function showToast(msg, ms = 2200) {
-    if (!state.toastEl) {
+  function showToast(msg, ms = 2600) {
+    injectStyles();
+    if (!state.toastEl || !document.documentElement.contains(state.toastEl)) {
       const t = document.createElement('div');
       t.id = 'cbm-toast';
       document.documentElement.appendChild(t);
@@ -118,24 +157,63 @@
     state.toastEl.textContent = msg;
     state.toastEl.classList.add('cbm-show');
     clearTimeout(state.toastTimer);
-    state.toastTimer = setTimeout(() => state.toastEl.classList.remove('cbm-show'), ms);
+    state.toastTimer = setTimeout(() => state.toastEl && state.toastEl.classList.remove('cbm-show'), ms);
   }
 
-  // -------------------- GM_xmlhttpRequest 跨域抓图 & 请求 VPS --------------------
+  function showErrorOnce(msg) {
+    const now = Date.now();
+    if (now - state.lastErrToastTs < 4500) return;
+    state.lastErrToastTs = now;
+    showToast(`翻译失败：${msg}`, 3600);
+  }
+
+  function updateFabBusy() {
+    if (!state.fabEl) return;
+    const ball = state.fabEl.querySelector('.cbm-ball');
+    if (ball) ball.classList.toggle('cbm-busy', state.activeRequests > 0);
+  }
+
+  // -------------------- 三重兼容请求：GM_xmlhttpRequest / GM.xmlHttpRequest / fetch --------------------
 
   function gmRequest(opts) {
-    return new Promise((resolve, reject) => {
-      if (typeof GM_xmlhttpRequest !== 'function') {
-        reject(new Error('当前脚本管理器不支持 GM_xmlhttpRequest'));
-        return;
+    const gmXhr =
+      typeof GM_xmlhttpRequest === 'function'
+        ? GM_xmlhttpRequest
+        : typeof GM !== 'undefined' && typeof GM.xmlHttpRequest === 'function'
+          ? GM.xmlHttpRequest.bind(GM)
+          : null;
+
+    if (gmXhr) {
+      return new Promise((resolve, reject) => {
+        gmXhr(
+          Object.assign({}, opts, {
+            onload: (res) => resolve(res),
+            onerror: (err) => reject(new Error((err && (err.error || err.statusText)) || '跨域网络请求失败')),
+            ontimeout: () => reject(new Error('请求超时'))
+          })
+        );
+      });
+    }
+
+    // 兜底：无 GM API 的精简浏览器退回 fetch（HTTPS 页面访问 HTTP IP 会受浏览器混合内容限制）
+    return fetch(opts.url, {
+      method: opts.method || 'GET',
+      headers: opts.headers,
+      body: opts.data
+    }).then(async (resp) => {
+      if (opts.responseType === 'blob') {
+        return { status: resp.status, response: await resp.blob() };
       }
-      GM_xmlhttpRequest(
-        Object.assign({}, opts, {
-          onload: (res) => resolve(res),
-          onerror: (err) => reject(new Error(err?.error || '网络请求失败')),
-          ontimeout: () => reject(new Error('请求超时'))
-        })
-      );
+      return { status: resp.status, responseText: await resp.text() };
+    });
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('读取图片 Blob 失败'));
+      reader.readAsDataURL(blob);
     });
   }
 
@@ -166,23 +244,37 @@
       url: src,
       responseType: 'blob',
       anonymous: false,
+      timeout: 25000,
       headers: { Referer: location.href }
     });
     if (res.status < 200 || res.status >= 300 || !res.response) {
       throw new Error(`抓图失败 HTTP ${res.status}`);
     }
-    const objUrl = URL.createObjectURL(res.response);
-    try {
-      const clean = await loadImg(objUrl);
-      return { drawable: clean, width: clean.naturalWidth || w, height: clean.naturalHeight || h };
-    } finally {
-      setTimeout(() => URL.revokeObjectURL(objUrl), 15000);
+    const dataUrl = await blobToDataUrl(res.response);
+    const clean = await loadImg(dataUrl);
+    return { drawable: clean, width: clean.naturalWidth || w, height: clean.naturalHeight || h };
+  }
+
+  async function testVpsHealth() {
+    if (!hasValidVps(state.cfg)) {
+      throw new Error('请先填写正确的 VPS 地址（如 http://IP:8765）');
     }
+    const base = state.cfg.vpsBaseUrl.replace(/\/+$/, '');
+    const headers = {};
+    if (state.cfg.vpsApiToken) headers['Authorization'] = `Bearer ${state.cfg.vpsApiToken}`;
+    const res = await gmRequest({ method: 'GET', url: `${base}/health`, headers, timeout: 10000 });
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`VPS 认证或连通失败 (HTTP ${res.status})`);
+    }
+    const d = JSON.parse(res.responseText);
+    return `VPS 连接成功！引擎: ${d.translator || 'auto'}`;
   }
 
   async function callVps(dataUrl, force = false) {
-    const base = (state.cfg.vpsBaseUrl || '').replace(/\/+$/, '');
-    if (!base) throw new Error('未设置 VPS 地址');
+    if (!hasValidVps(state.cfg)) {
+      throw new Error('请先点击右下角「译」→「VPS 设置」填入地址与 Token');
+    }
+    const base = state.cfg.vpsBaseUrl.replace(/\/+$/, '');
     const headers = { 'Content-Type': 'application/json' };
     if (state.cfg.vpsApiToken) headers['Authorization'] = `Bearer ${state.cfg.vpsApiToken}`;
 
@@ -190,7 +282,7 @@
       method: 'POST',
       url: `${base}/api/v1/translate-json`,
       headers,
-      timeout: 35000,
+      timeout: 40000,
       data: JSON.stringify({
         image_base64: dataUrl,
         page_title: document.title || '',
@@ -198,8 +290,11 @@
         force: Boolean(force)
       })
     });
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('API Token 无效，请检查 VPS 设置');
+    }
     if (res.status < 200 || res.status >= 300) {
-      throw new Error(`VPS HTTP ${res.status}`);
+      throw new Error(`VPS 响应异常 HTTP ${res.status}`);
     }
     const data = JSON.parse(res.responseText);
     const imgW = Number(data.imgWidth) || 1000;
@@ -295,10 +390,36 @@
     if (!src || /\.svg(\?|$)|\.gif(\?|$)/i.test(src)) return false;
     const vw = window.innerWidth || 390;
     const r = img.getBoundingClientRect();
-    const webtoonHint = /wp-manga-chapter-img|chapter|webtoon|manga/i.test(img.className) || Boolean(img.closest('.reading-content,.page-break,.chapter-content'));
-    const minW = Math.min(240, Math.round(vw * 0.52));
-    const minH = webtoonHint || r.width >= vw * 0.6 ? 75 : 150;
-    return r.width >= minW && r.height >= minH && img.naturalWidth >= 240 && img.naturalHeight >= minH && r.width / r.height <= 7.5;
+    const webtoonHint =
+      /wp-manga-chapter-img|chapter|webtoon|manga|comic/i.test(img.className) ||
+      Boolean(img.closest('.reading-content,.page-break,.chapter-content,#viewer'));
+    const minW = Math.min(240, Math.round(vw * 0.5));
+    const minH = webtoonHint || r.width >= vw * 0.58 ? 75 : 150;
+    return (
+      r.width >= minW &&
+      r.height >= minH &&
+      img.naturalWidth >= 240 &&
+      img.naturalHeight >= minH &&
+      r.width / r.height <= 7.5
+    );
+  }
+
+  function watchImgLoad(img) {
+    if (!(img instanceof HTMLImageElement) || img.dataset.cbmWatched === '1') return;
+    img.dataset.cbmWatched = '1';
+    if (!img.complete || img.naturalWidth === 0) {
+      img.addEventListener(
+        'load',
+        () => {
+          if (isCandidateImg(img)) {
+            ensureFab();
+            updateProg();
+            pump();
+          }
+        },
+        { once: true }
+      );
+    }
   }
 
   function getOrCreateRec(img) {
@@ -335,9 +456,10 @@
       if (s2 !== raw && s2 !== s1) cands.push(s2);
     }
     const minPx = 9;
-    const maxPx = bubble.origFontRatio > 0 && containerH > 0
-      ? Math.max(11, Math.min(32, Math.round(bubble.origFontRatio * containerH * 1.4)))
-      : Math.max(11, Math.min(26, Math.floor(Math.min(w, h) * 0.55)));
+    const maxPx =
+      bubble.origFontRatio > 0 && containerH > 0
+        ? Math.max(11, Math.min(32, Math.round(bubble.origFontRatio * containerH * 1.4)))
+        : Math.max(11, Math.min(26, Math.floor(Math.min(w, h) * 0.55)));
     let best = minPx, bestTxt = cands[0], okAny = false;
     for (const c of cands) {
       textEl.textContent = c;
@@ -412,21 +534,6 @@
     requestAnimationFrame(() => syncPos(rec));
   }
 
-  // -------------------- 两级优先级 + 整话后台预翻调度器 --------------------
-
-  function nudgeLazy() {
-    let n = 0;
-    document.querySelectorAll('img').forEach((img) => {
-      if (n >= 3 || !img.isConnected) return;
-      if (img.getBoundingClientRect().bottom < -200) return;
-      if ((!img.complete || img.naturalWidth === 0) && img.loading === 'lazy') {
-        img.loading = 'eager';
-        img.addEventListener('load', () => pump(), { once: true });
-        n++;
-      }
-    });
-  }
-
   // -------------------- 一键全话唤醒 data-src + 进度条 --------------------
 
   const LAZY_ATTRS = ['data-src', 'data-lazy-src', 'data-original', 'data-url', 'data-actualsrc', 'data-cfsrc'];
@@ -435,7 +542,10 @@
     let woken = 0, loading = 0;
     document.querySelectorAll('img').forEach((img) => {
       if (!img.isConnected) return;
-      const webtoonHint = /wp-manga-chapter-img|chapter|webtoon|manga/i.test(img.className) || Boolean(img.closest('.reading-content,.page-break,.chapter-content'));
+      watchImgLoad(img);
+      const webtoonHint =
+        /wp-manga-chapter-img|chapter|webtoon|manga/i.test(img.className) ||
+        Boolean(img.closest('.reading-content,.page-break,.chapter-content'));
       let lazyUrl = '';
       for (const a of LAZY_ATTRS) {
         const v = (img.getAttribute(a) || '').trim();
@@ -444,15 +554,14 @@
       if (!webtoonHint && !lazyUrl && img.getBoundingClientRect().width < 200) return;
       if (img.loading === 'lazy') { img.loading = 'eager'; woken++; }
       const cur = img.currentSrc || img.src || '';
-      const placeholder = !cur || cur.startsWith('data:image/svg') || cur.startsWith('data:image/gif') || /placeholder|blank|loading|1x1/i.test(cur) || (img.complete && img.naturalWidth <= 10);
+      const placeholder =
+        !cur || cur.startsWith('data:image/svg') || cur.startsWith('data:image/gif') ||
+        /placeholder|blank|loading|1x1/i.test(cur) || (img.complete && img.naturalWidth <= 10);
       if (lazyUrl && placeholder) {
         img.setAttribute('src', lazyUrl);
         woken++;
       }
-      if (!img.complete || img.naturalWidth <= 10) {
-        loading++;
-        img.addEventListener('load', () => { updateProg(); pump(); }, { once: true });
-      }
+      if (!img.complete || img.naturalWidth <= 10) loading++;
     });
     return { woken, loading };
   }
@@ -491,7 +600,10 @@
         } else {
           total += 1;
         }
-      } else if ((!img.complete || img.naturalWidth <= 10) && (/wp-manga-chapter-img|chapter|webtoon/i.test(img.className) || img.closest('.reading-content,.page-break'))) {
+      } else if (
+        (!img.complete || img.naturalWidth <= 10) &&
+        (/wp-manga-chapter-img|chapter|webtoon/i.test(img.className) || img.closest('.reading-content,.page-break'))
+      ) {
         pending++;
       }
     });
@@ -515,7 +627,20 @@
     }
   }
 
+  function resetErroredRecords() {
+    for (const rec of state.records.values()) {
+      if (rec.status === 'error') {
+        rec.status = 'idle';
+        rec.stripState = null;
+      }
+    }
+  }
+
   function startFullChapter(force = false) {
+    if (!hasValidVps(state.cfg)) {
+      showToast('请先点击「VPS 设置」填入地址与 Token', 3200);
+      return;
+    }
     state.fullChapterMode = true;
     state.fullChapterForce = Boolean(force);
     state.cfg.autoTranslate = true;
@@ -525,6 +650,8 @@
         rec.stripState = null;
         rec.bubbles = [];
       }
+    } else {
+      resetErroredRecords();
     }
     const { woken, loading } = wakeAllLazyImgs();
     updateProg();
@@ -537,6 +664,21 @@
       updateProg();
     }, 1000);
     showToast(`开始全话翻译${woken > 0 ? `（唤醒 ${woken} 张懒图）` : ''}${loading > 0 ? `，载图中 ${loading}` : ''}`);
+  }
+
+  // -------------------- 两级优先级 + 整话持续自动预翻调度器 --------------------
+
+  function nudgeLazy() {
+    let n = 0;
+    document.querySelectorAll('img').forEach((img) => {
+      if (n >= 3 || !img.isConnected) return;
+      watchImgLoad(img);
+      if (img.getBoundingClientRect().bottom < -200) return;
+      if ((!img.complete || img.naturalWidth === 0) && img.loading === 'lazy') {
+        img.loading = 'eager';
+        n++;
+      }
+    });
   }
 
   function pickWork() {
@@ -558,8 +700,9 @@
       }
     }
 
-    if (state.fullChapterMode || isSiteEnabled()) {
+    if (state.fullChapterMode || isSiteAutoEnabled()) {
       document.querySelectorAll('img').forEach((img) => {
+        watchImgLoad(img);
         if (!isCandidateImg(img)) return;
         const rec = state.records.get(img);
         if (rec && rec.status !== 'idle') return;
@@ -572,6 +715,18 @@
   }
 
   function pump() {
+    if (!hasValidVps(state.cfg)) {
+      // 尚未配置 VPS 时不把图片标成 error，发现漫画图时只弹一次友好提醒并显示悬浮球
+      if (isSiteNotBlacklisted() && Array.from(document.querySelectorAll('img')).some(isCandidateImg)) {
+        ensureFab();
+        if (!state.unconfiguredHintShown) {
+          state.unconfiguredHintShown = true;
+          showToast('ComicBubble AI：请点右下角「译」→「VPS 设置」填入地址与 Token', 4200);
+        }
+      }
+      return;
+    }
+
     while (state.activeRequests < state.cfg.maxConcurrency) {
       const w = pickWork();
       if (!w) { nudgeLazy(); break; }
@@ -581,6 +736,7 @@
         const st = rec.stripState;
         st.active.add(tile.index);
         state.activeRequests++;
+        updateFabBusy();
         (async () => {
           try {
             const dataUrl = encodeTile(st.drawable, st.w, tile.offsetY, tile.sliceH);
@@ -593,11 +749,13 @@
               rec.stripState = null;
               rec.status = 'done';
             }
-          } catch (_) {
+          } catch (err) {
             st.done.add(tile.index);
+            showErrorOnce(err.message || String(err));
           } finally {
             st.active.delete(tile.index);
             state.activeRequests--;
+            updateFabBusy();
             updateProg();
             pump();
           }
@@ -609,12 +767,21 @@
         const rec = getOrCreateRec(w.img);
         rec.status = 'loading';
         state.activeRequests++;
+        updateFabBusy();
         nudgeLazy();
         (async () => {
           try {
             const { drawable, width, height } = await acquireDrawable(w.img);
             if (height / Math.max(1, width) > 2.3 && height > 2200) {
-              rec.stripState = { drawable, w: width, h: height, tiles: planTiles(width, height), done: new Set(), active: new Set(), force: state.fullChapterForce };
+              rec.stripState = {
+                drawable,
+                w: width,
+                h: height,
+                tiles: planTiles(width, height),
+                done: new Set(),
+                active: new Set(),
+                force: state.fullChapterForce
+              };
               rec.status = 'streaming';
             } else {
               const dataUrl = encodeTile(drawable, width, 0, height);
@@ -622,10 +789,12 @@
               rec.status = 'done';
               renderRec(rec);
             }
-          } catch (_) {
+          } catch (err) {
             rec.status = 'error';
+            showErrorOnce(err.message || String(err));
           } finally {
             state.activeRequests--;
+            updateFabBusy();
             updateProg();
             pump();
           }
@@ -676,6 +845,17 @@
       return b;
     };
 
+    const autoB = addBtn(state.cfg.autoTranslate ? '自动翻译：开' : '自动翻译：关', (b) => {
+      state.cfg.autoTranslate = !state.cfg.autoTranslate;
+      saveCfg(state.cfg);
+      b.textContent = state.cfg.autoTranslate ? '自动翻译：开' : '自动翻译：关';
+      showToast(state.cfg.autoTranslate ? '已开启自动翻译' : '已关闭自动翻译');
+      if (state.cfg.autoTranslate) {
+        resetErroredRecords();
+        pump();
+      }
+    });
+
     const togB = addBtn('隐藏译文', (b) => {
       state.overlayVisible = !state.overlayVisible;
       for (const rec of state.records.values()) rec.bubblesEl.classList.toggle('cbm-hidden', !state.overlayVisible);
@@ -683,24 +863,36 @@
       showToast(state.overlayVisible ? '已显示译文' : '已显示英文原图');
     });
 
-    addBtn('一键全话翻完', () => {
-      startFullChapter(false);
-    });
+    addBtn('一键全话翻完', () => startFullChapter(false));
+    addBtn('强制全话重译', () => startFullChapter(true));
 
-    addBtn('强制全话重译', () => {
-      startFullChapter(true);
-    });
-
-    addBtn('VPS 设置', () => {
-      const url = prompt('VPS 后端地址:', state.cfg.vpsBaseUrl);
+    addBtn('VPS 设置', async () => {
+      const url = prompt('VPS 后端地址（例 http://1.2.3.4:8765）:', state.cfg.vpsBaseUrl || 'http://');
       if (url === null) return;
-      const tok = prompt('API Token:', state.cfg.vpsApiToken);
+      const tok = prompt('API Token:', state.cfg.vpsApiToken || '');
       if (tok === null) return;
       state.cfg.vpsBaseUrl = url.trim().replace(/\/+$/, '');
       state.cfg.vpsApiToken = tok.trim();
+      state.cfg.autoTranslate = true;
       saveCfg(state.cfg);
-      showToast('VPS 配置已保存');
-      pump();
+      resetErroredRecords();
+      try {
+        const msg = await testVpsHealth();
+        showToast(`${msg}，已自动开始翻译！`, 3000);
+        pump();
+      } catch (err) {
+        showToast(err.message || String(err), 3800);
+      }
+    });
+
+    addBtn('测试 VPS', async () => {
+      showToast('正在测试 VPS 连通性...', 2000);
+      try {
+        const msg = await testVpsHealth();
+        showToast(msg, 3000);
+      } catch (err) {
+        showToast(err.message || String(err), 3800);
+      }
     });
 
     addBtn('隐藏悬浮球', () => { wrap.style.display = 'none'; });
@@ -723,6 +915,7 @@
     ball.onclick = (e) => {
       e.stopPropagation();
       if (moved) { moved = false; return; }
+      autoB.textContent = state.cfg.autoTranslate ? '自动翻译：开' : '自动翻译：关';
       togB.textContent = state.overlayVisible ? '隐藏译文' : '显示译文';
       menu.classList.toggle('cbm-open');
     };
@@ -746,8 +939,24 @@
   window.addEventListener('resize', scheduleSync, { passive: true });
   if (window.visualViewport) window.visualViewport.addEventListener('resize', scheduleSync, { passive: true });
 
-  new MutationObserver(() => scheduleSync()).observe(document.documentElement, { childList: true, subtree: true });
+  new MutationObserver(() => {
+    document.querySelectorAll('img').forEach(watchImgLoad);
+    scheduleSync();
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset'] });
 
-  setTimeout(() => { pump(); }, 800);
-  setTimeout(() => { pump(); }, 2500);
+  // 启动监听全页图片加载并按需展示悬浮球 + 启动自动翻译
+  function bootstrap() {
+    document.querySelectorAll('img').forEach(watchImgLoad);
+    if (isSiteNotBlacklisted()) {
+      const hasComic = Array.from(document.querySelectorAll('img')).some(
+        (im) => isCandidateImg(im) || /wp-manga-chapter-img|chapter|webtoon|manga/i.test(im.className)
+      );
+      if (hasComic) ensureFab();
+    }
+    pump();
+  }
+
+  bootstrap();
+  setTimeout(bootstrap, 1000);
+  setTimeout(bootstrap, 2800);
 })();
