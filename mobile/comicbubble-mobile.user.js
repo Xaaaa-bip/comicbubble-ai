@@ -568,26 +568,6 @@
 
   function updateProg() {
     if (!state.fullChapterMode || window !== window.top) return;
-    if (!state.progEl) {
-      injectStyles();
-      const d = document.createElement('div'); d.id = 'cbm-prog';
-      const top = document.createElement('div'); top.className = 'cbm-ptop';
-      const txt = document.createElement('span'); txt.className = 'cbm-ptxt';
-      const stp = document.createElement('button'); stp.className = 'cbm-pstop'; stp.textContent = '停止';
-      stp.onclick = () => {
-        state.fullChapterMode = false;
-        clearInterval(state.fullChapterTimer);
-        d.classList.remove('cbm-show');
-        showToast('已停止全话翻译');
-      };
-      top.append(txt, stp);
-      const tr = document.createElement('div'); tr.className = 'cbm-ptrack';
-      const fl = document.createElement('div'); fl.className = 'cbm-pfill';
-      tr.appendChild(fl);
-      d.append(top, tr);
-      document.documentElement.appendChild(d);
-      state.progEl = d;
-    }
     let total = 0, done = 0, bubbles = 0, pending = 0;
     document.querySelectorAll('img').forEach((img) => {
       if (!img.isConnected) return;
@@ -608,22 +588,10 @@
       }
     });
     total += pending;
-    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
-    const bar = state.progEl;
-    bar.classList.add('cbm-show');
-    bar.querySelector('.cbm-pfill').style.width = `${pct}%`;
-    const txt = bar.querySelector('.cbm-ptxt');
-    const stp = bar.querySelector('.cbm-pstop');
     if (total > 0 && done >= total && pending === 0 && state.activeRequests === 0) {
-      txt.textContent = `全话翻译完成 (100%) · 共 ${bubbles} 处`;
-      stp.style.display = 'none';
       state.fullChapterMode = false;
       clearInterval(state.fullChapterTimer);
-      clearTimeout(state.progHideTimer);
-      state.progHideTimer = setTimeout(() => bar.classList.remove('cbm-show'), 3500);
-    } else {
-      stp.style.display = '';
-      txt.textContent = `全话翻译中 ${done}/${total} (${pct}%) · 已译 ${bubbles} 处`;
+      showToast(`全话翻译完成 · 共 ${bubbles} 处`, 2400);
     }
   }
 

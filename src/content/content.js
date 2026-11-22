@@ -1151,17 +1151,7 @@
 
   function updateFullChapterProgress() {
     if (!state.fullChapterMode) return;
-    const bar = ensureProgressBar();
-    if (!bar) return;
-
     const st = computeFullChapterStats();
-    const textEl = bar.querySelector('.cb-prog-text');
-    const fillEl = bar.querySelector('.cb-prog-fill');
-    const stopBtn = bar.querySelector('.cb-prog-stop');
-
-    bar.classList.add('cb-show');
-    clearTimeout(state.progressHideTimer);
-
     const isFinished =
       st.totalUnits > 0 &&
       st.doneUnits >= st.totalUnits &&
@@ -1170,23 +1160,11 @@
       state.queue.length === 0;
 
     if (isFinished) {
-      fillEl.style.width = '100%';
-      textEl.textContent = `全话翻译完成 (100%) · 共译 ${st.bubblesTotal} 处气泡`;
-      stopBtn.style.display = 'none';
       state.fullChapterMode = false;
       state.fullChapterForce = false;
       clearInterval(state.fullChapterTimer);
       state.fullChapterTimer = null;
-      state.progressHideTimer = setTimeout(() => {
-        if (state.progressEl && !state.fullChapterMode) {
-          state.progressEl.classList.remove('cb-show');
-        }
-      }, 3600);
-    } else {
-      stopBtn.style.display = '';
-      fillEl.style.width = `${st.pct}%`;
-      const waitHint = st.pendingImages > 0 ? ` · 载图中 ${st.pendingImages}` : '';
-      textEl.textContent = `全话翻译中 ${st.doneUnits}/${st.totalUnits} (${st.pct}%) · 已译 ${st.bubblesTotal} 处${waitHint}`;
+      showToast(`全话翻译完成 · 共译 ${st.bubblesTotal} 处气泡`, 2400);
     }
   }
 
